@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -34,342 +34,143 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 
 // Tipo para los refugios
-type Pet = {
+type Mascota = {
   id: string;
   name: string;
-  image: string;
   description: string;
   age: string;
   size: string;
+  image: string;
 };
 
-type UrgentCause = {
+type CausaUrgente = {
   id: string;
   title: string;
   description: string;
   goal: number;
   current: number;
+  image: string;
 };
 
 type Refugio = {
   id: string;
   name: string;
-  image: string;
-  rating: number;
+  description: string;
   address: string;
   phone: string;
-  description: string;
-  email?: string;
-  bankAccount?: string;
-  pets: Pet[];
-  urgentCauses: UrgentCause[];
+  email: string;
+  bank_account: string;
+  image: string;
+  mascotas: Mascota[];
+  causas_urgentes: CausaUrgente[];
+  created_at: string;
 };
 
 export default function Refugios() {
   const { supabase } = useAuth();
   const [refugios, setRefugios] = useState<Refugio[]>([]);
   const [loading, setLoading] = useState(true);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'info' | 'warning' });
+
+  // Dialogos y formularios
   const [openDialog, setOpenDialog] = useState(false);
-  const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
-  const [openViewDialog, setOpenViewDialog] = useState(false);
   const [currentRefugio, setCurrentRefugio] = useState<Refugio | null>(null);
-  const [formData, setFormData] = useState<Partial<Refugio>>({
-    name: '',
-    description: '',
-    address: '',
-    phone: '',
-    email: '',
-    bankAccount: '',
-    image: ''
-  });
-  const [snackbar, setSnackbar] = useState({
-    open: false,
-    message: '',
-    severity: 'success' as 'success' | 'error' | 'info' | 'warning'
+  const [formData, setFormData] = useState<Partial<Refugio>>({ 
+    name: '', 
+    description: '', 
+    address: '', 
+    phone: '', 
+    email: '', 
+    bank_account: '', 
+    image: '', 
+    mascotas: [], 
+    causas_urgentes: [] 
   });
 
-  // Cargar refugios
-  useEffect(() => {
-    const fetchRefugios = async () => {
-      try {
-        setLoading(true);
-        // En una implementación real, esto vendría de la base de datos
-        // Aquí usamos datos de ejemplo similares a los de la app móvil
-        const mockRefugios: Refugio[] = [
-          {
-            id: '1',
-            name: 'Refugio Patitas Felices',
-            image: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b',
-            rating: 4.9,
-            address: 'Av. Libertador 1234',
-            phone: '+54 11 1234 5678',
-            description: 'Refugio dedicado a perros y gatos abandonados. Ofrecemos adopción responsable.',
-            email: 'contacto@patitasfelices.org',
-            bankAccount: 'Banco Nación: 0000-1111-2222',
-            pets: [
-              {
-                id: 'p1',
-                name: 'Luna',
-                image: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1',
-                description: 'Perrita dulce y juguetona',
-                age: '2 años',
-                size: 'Mediano'
-              },
-              {
-                id: 'p2',
-                name: 'Simba',
-                image: 'https://images.unsplash.com/photo-1573865526739-10659fec78a5',
-                description: 'Gatito muy cariñoso',
-                age: '6 meses',
-                size: 'Pequeño'
-              }
-            ],
-            urgentCauses: [
-              {
-                id: 'c1',
-                title: 'Alimentos para el invierno',
-                description: 'Necesitamos juntar alimentos para nuestros peludos',
-                goal: 50000,
-                current: 25000
-              }
-            ]
-          },
-          {
-            id: '2',
-            name: 'Hogar de Mascotas',
-            image: 'https://images.unsplash.com/photo-1601758124510-52d02ddb7cbd',
-            rating: 4.7,
-            address: 'Calle San Martín 567',
-            phone: '+54 11 8765 4321',
-            description: 'Rescatamos animales en situación de calle y les buscamos un hogar amoroso.',
-            email: 'info@hogardemascotas.org',
-            bankAccount: 'Banco Provincia: 3333-4444-5555',
-            pets: [
-              {
-                id: 'p3',
-                name: 'Rocky',
-                image: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb',
-                description: 'Perro adulto muy tranquilo',
-                age: '5 años',
-                size: 'Grande'
-              }
-            ],
-            urgentCauses: [
-              {
-                id: 'c2',
-                title: 'Campaña de vacunación',
-                description: 'Ayudanos a vacunar a todos nuestros rescatados',
-                goal: 30000,
-                current: 15000
-              }
-            ]
-          },
-          {
-            id: '3',
-            name: 'Refugio Huellitas',
-            image: 'https://images.unsplash.com/photo-1541781774459-bb2af2f05b55',
-            rating: 4.8,
-            address: 'Av. Rivadavia 890',
-            phone: '+54 11 2468 1357',
-            description: 'Más de 10 años rescatando y rehabilitando animales para darlos en adopción.',
-            email: 'contacto@huellitas.org',
-            bankAccount: 'Banco Galicia: 6666-7777-8888',
-            pets: [
-              {
-                id: 'p4',
-                name: 'Milo',
-                image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba',
-                description: 'Gatito juguetón',
-                age: '1 año',
-                size: 'Pequeño'
-              }
-            ],
-            urgentCauses: [
-              {
-                id: 'c3',
-                title: 'Reparación del refugio',
-                description: 'Necesitamos arreglar techos y paredes',
-                goal: 100000,
-                current: 45000
-              }
-            ]
-          },
-        ];
+  // Manejar cambios en mascotas
+  const handleMascotaChange = (idx: number, field: keyof Mascota, value: string | number) => {
+    setFormData(prev => {
+      const newMascotas = [...(prev.mascotas || [])];
+      newMascotas[idx] = {
+        ...newMascotas[idx],
+        [field]: value
+      };
+      return { ...prev, mascotas: newMascotas };
+    });
+  };
 
-        setRefugios(mockRefugios);
-      } catch (error) {
-        console.error('Error al cargar refugios:', error);
-        setSnackbar({
-          open: true,
-          message: 'Error al cargar los refugios',
-          severity: 'error'
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Manejar cambios en causas urgentes
+  const handleCausaUrgenteChange = (idx: number, field: keyof CausaUrgente, value: string | number) => {
+    setFormData(prev => {
+      const newCausas = [...(prev.causas_urgentes || [])];
+      newCausas[idx] = {
+        ...newCausas[idx],
+        [field]: value
+      };
+      return { ...prev, causas_urgentes: newCausas };
+    });
+  };
 
-    fetchRefugios();
-  }, [supabase]);
+  // Referencias para inputs de archivos
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const mascotaInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Manejar apertura del diálogo de creación/edición
-  const handleOpenDialog = (refugio?: Refugio) => {
-    if (refugio) {
-      setCurrentRefugio(refugio);
-      setFormData({
-        name: refugio.name,
-        description: refugio.description,
-        address: refugio.address,
-        phone: refugio.phone,
-        email: refugio.email || '',
-        bankAccount: refugio.bankAccount || '',
-        image: refugio.image
-      });
-    } else {
-      setCurrentRefugio(null);
-      setFormData({
-        name: '',
-        description: '',
-        address: '',
-        phone: '',
-        email: '',
-        bankAccount: '',
-        image: ''
-      });
+  // Subir imagen a Supabase Storage
+  const uploadImage = async (file: File, path: string) => {
+    const { data, error } = await supabase.storage.from('refugios').upload(path, file, { upsert: true });
+    if (error) throw error;
+    // Devuelve la URL pública
+    const { publicUrl } = supabase.storage.from('refugios').getPublicUrl(path).data;
+    return publicUrl;
+  };
+
+  // --- CRUD REFUGIOS ---
+  const fetchRefugios = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('refugios')
+      .select('*')
+      .order('name');
+    if (!error) {
+      // Normaliza los arrays para evitar nulls
+      const normalizados = (data || []).map(r => ({
+        ...r,
+        mascotas: Array.isArray(r.mascotas) ? r.mascotas : [],
+        causas_urgentes: Array.isArray(r.causas_urgentes) ? r.causas_urgentes : [],
+      }));
+      setRefugios(normalizados);
     }
-    setOpenDialog(true);
+    setLoading(false);
   };
 
-  // Manejar cierre del diálogo
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-  };
-
-  // Manejar cambios en el formulario
-  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  // Manejar envío del formulario
-  const handleSubmit = async () => {
+  const handleSubmitRefugio = async () => {
+    setLoading(true);
     try {
-      // Validar campos obligatorios
-      if (!formData.name || !formData.description || !formData.address || !formData.phone) {
-        setSnackbar({
-          open: true,
-          message: 'Por favor complete todos los campos obligatorios',
-          severity: 'error'
-        });
-        return;
-      }
+      console.log('Datos a guardar:', formData); // Debug: muestra los datos que se van a guardar
+      
+      // Preparar el payload asegurando que mascotas y causas_urgentes sean arrays
+      const payload = {
+        ...formData,
+        mascotas: Array.isArray(formData.mascotas) ? formData.mascotas : [],
+        causas_urgentes: Array.isArray(formData.causas_urgentes) ? formData.causas_urgentes : [],
+      };
 
-      // En una implementación real, aquí se enviaría a la base de datos
+      let error;
       if (currentRefugio) {
-        // Actualizar refugio existente
-        const updatedRefugios = refugios.map(r => 
-          r.id === currentRefugio.id ? 
-          { 
-            ...r, 
-            name: formData.name || r.name,
-            description: formData.description || r.description,
-            address: formData.address || r.address,
-            phone: formData.phone || r.phone,
-            email: formData.email,
-            bankAccount: formData.bankAccount,
-            image: formData.image || r.image
-          } : r
-        );
-        setRefugios(updatedRefugios);
-        setSnackbar({
-          open: true,
-          message: 'Refugio actualizado correctamente',
-          severity: 'success'
-        });
+        ({ error } = await supabase.from('refugios').update(payload).eq('id', currentRefugio.id));
       } else {
-        // Crear nuevo refugio
-        const newRefugio: Refugio = {
-          id: `${Date.now()}`, // Generar ID temporal
-          name: formData.name || '',
-          description: formData.description || '',
-          address: formData.address || '',
-          phone: formData.phone || '',
-          email: formData.email,
-          bankAccount: formData.bankAccount,
-          image: formData.image || 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b',
-          rating: 5.0,
-          pets: [],
-          urgentCauses: []
-        };
-        setRefugios([...refugios, newRefugio]);
-        setSnackbar({
-          open: true,
-          message: 'Refugio creado correctamente',
-          severity: 'success'
-        });
+        ({ error } = await supabase.from('refugios').insert([payload]));
       }
 
-      handleCloseDialog();
-    } catch (error) {
-      console.error('Error al guardar refugio:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error al guardar el refugio',
-        severity: 'error'
-      });
+      setSnackbar({ open: true, message: error ? 'Error al guardar refugio' : 'Refugio guardado', severity: error ? 'error' : 'success' });
+      setOpenDialog(false);
+      await fetchRefugios();
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Manejar apertura del diálogo de eliminación
-  const handleOpenDeleteDialog = (refugio: Refugio) => {
-    setCurrentRefugio(refugio);
-    setOpenDeleteDialog(true);
-  };
-
-  // Manejar cierre del diálogo de eliminación
-  const handleCloseDeleteDialog = () => {
-    setOpenDeleteDialog(false);
-  };
-
-  // Manejar eliminación de refugio
-  const handleDeleteRefugio = () => {
-    try {
-      if (currentRefugio) {
-        // En una implementación real, aquí se eliminaría de la base de datos
-        const updatedRefugios = refugios.filter(r => r.id !== currentRefugio.id);
-        setRefugios(updatedRefugios);
-        setSnackbar({
-          open: true,
-          message: 'Refugio eliminado correctamente',
-          severity: 'success'
-        });
-      }
-      handleCloseDeleteDialog();
-    } catch (error) {
-      console.error('Error al eliminar refugio:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error al eliminar el refugio',
-        severity: 'error'
-      });
-    }
-  };
-
-  // Manejar apertura del diálogo de visualización
-  const handleOpenViewDialog = (refugio: Refugio) => {
-    setCurrentRefugio(refugio);
-    setOpenViewDialog(true);
-  };
-
-  // Manejar cierre del diálogo de visualización
-  const handleCloseViewDialog = () => {
-    setOpenViewDialog(false);
-  };
-
-  // Manejar cierre del snackbar
-  const handleCloseSnackbar = () => {
-    setSnackbar(prev => ({ ...prev, open: false }));
-  };
+  useEffect(() => { fetchRefugios(); }, []);
 
   if (loading) {
     return (
@@ -388,7 +189,7 @@ export default function Refugios() {
         <Button 
           variant="contained" 
           startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
+          onClick={() => setOpenDialog(true)}
         >
           Nuevo Refugio
         </Button>
@@ -402,8 +203,8 @@ export default function Refugios() {
               <TableCell>Nombre</TableCell>
               <TableCell>Dirección</TableCell>
               <TableCell>Teléfono</TableCell>
-              <TableCell>Valoración</TableCell>
               <TableCell>Mascotas</TableCell>
+              <TableCell>Causas urgentes</TableCell>
               <TableCell align="center">Acciones</TableCell>
             </TableRow>
           </TableHead>
@@ -422,31 +223,49 @@ export default function Refugios() {
                 <TableCell>{refugio.address}</TableCell>
                 <TableCell>{refugio.phone}</TableCell>
                 <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <StarIcon sx={{ color: '#FFD700', mr: 0.5 }} />
-                    <Typography>{refugio.rating}</Typography>
-                  </Box>
+                  <Chip 
+                    label={`${refugio.mascotas.length} mascotas`} 
+                    color="primary" 
+                    variant="outlined" 
+                  />
                 </TableCell>
                 <TableCell>
                   <Chip 
-                    label={`${refugio.pets.length} mascotas`} 
+                    label={`${refugio.causas_urgentes.length} causas urgentes`} 
                     color="primary" 
                     variant="outlined" 
                   />
                 </TableCell>
                 <TableCell align="center">
                   <Tooltip title="Ver detalles">
-                    <IconButton onClick={() => handleOpenViewDialog(refugio)}>
+                    <IconButton onClick={() => setCurrentRefugio(refugio)}>
                       <ViewIcon />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Editar">
-                    <IconButton onClick={() => handleOpenDialog(refugio)}>
+                    <IconButton onClick={() => {
+                      setCurrentRefugio(refugio);
+                      setFormData({
+                        name: refugio.name,
+                        description: refugio.description,
+                        address: refugio.address,
+                        phone: refugio.phone,
+                        email: refugio.email,
+                        bank_account: refugio.bank_account,
+                        image: refugio.image,
+                        mascotas: Array.isArray(refugio.mascotas) ? refugio.mascotas : [],
+                        causas_urgentes: Array.isArray(refugio.causas_urgentes) ? refugio.causas_urgentes : [],
+                      });
+                      setOpenDialog(true);
+                    }}>
                       <EditIcon />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Eliminar">
-                    <IconButton onClick={() => handleOpenDeleteDialog(refugio)}>
+                    <IconButton onClick={() => {
+                      setCurrentRefugio(refugio);
+                      // Eliminar refugio
+                    }}>
                       <DeleteIcon />
                     </IconButton>
                   </Tooltip>
@@ -458,211 +277,338 @@ export default function Refugios() {
       </TableContainer>
 
       {/* Diálogo de creación/edición */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          {currentRefugio ? `Editar ${currentRefugio.name}` : 'Crear Nuevo Refugio'}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, bgcolor: 'primary.main', color: 'white', py: 2, mb: 1 }}>
+          <Avatar src={formData.image} sx={{ width: 60, height: 60, mr: 2, bgcolor: 'grey.200', border: '2px solid white' }} variant="rounded">
+            {!formData.image && formData.name?.[0]}
+          </Avatar>
+          <Box>
+            <Typography variant="h5" fontWeight="bold">
+              {currentRefugio ? `Editar Refugio` : 'Crear Nuevo Refugio'}
+            </Typography>
+            <Typography variant="subtitle1" sx={{ opacity: 0.8 }}>
+              {formData.name || 'Completa los datos para tu refugio'}
+            </Typography>
+          </Box>
         </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
+        <DialogContent dividers sx={{ background: '#f8fafc', px: 4, py: 3 }}>
+          <Grid container spacing={4}>
+            {/* Logo y nombre */}
+            <Grid item xs={12} md={4}>
+              <Paper elevation={1} sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: '#f1f5f9', borderRadius: 3 }}>
+                <Avatar src={formData.image} sx={{ width: 90, height: 90, mb: 1, bgcolor: 'grey.200', border: '2px solid #1976d2' }} variant="rounded">
+                  {!formData.image && formData.name?.[0]}
+                </Avatar>
+                <Button
+                  variant="contained"
+                  component="label"
+                  size="small"
+                  sx={{ borderRadius: 2 }}
+                >
+                  Subir Logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    ref={logoInputRef}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        try {
+                          const url = await uploadImage(file, `logos/${crypto.randomUUID()}-${file.name}`);
+                          setFormData(prev => ({ ...prev, image: url }));
+                          setSnackbar({ open: true, message: 'Logo subido correctamente', severity: 'success' });
+                        } catch (err) {
+                          setSnackbar({ open: true, message: 'Error al subir logo', severity: 'error' });
+                        }
+                      }
+                    }}
+                  />
+                </Button>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              <Paper elevation={1} sx={{ p: 3, bgcolor: '#f1f5f9', borderRadius: 3 }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <TextField
+                      name="name"
+                      label="Nombre del refugio *"
+                      fullWidth
+                      value={formData.name}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                      InputProps={{ sx: { fontWeight: 'bold', fontSize: 22 } }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      name="description"
+                      label="Descripción *"
+                      fullWidth
+                      multiline
+                      minRows={3}
+                      value={formData.description}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                    />
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Grid>
+
+            {/* Datos de contacto y bancarios */}
+            <Grid item xs={12} md={6}>
+              <Paper elevation={1} sx={{ p: 3, bgcolor: '#f1f5f9', borderRadius: 3 }}>
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2, color: 'primary.main' }}>Contacto</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      name="address"
+                      label="Dirección *"
+                      fullWidth
+                      value={formData.address}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      name="phone"
+                      label="Teléfono *"
+                      fullWidth
+                      value={formData.phone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      name="email"
+                      label="Correo electrónico"
+                      fullWidth
+                      value={formData.email}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      name="bank_account"
+                      label="Cuenta bancaria"
+                      fullWidth
+                      value={formData.bank_account}
+                      onChange={(e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))}
+                    />
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Grid>
+
+            {/* Mascotas para adoptar */}
+            <Grid item xs={12} md={6}>
+              <Paper elevation={1} sx={{ p: 3, bgcolor: '#f1f5f9', borderRadius: 3 }}>
+                <Box mb={2} display="flex" alignItems="center" gap={1}>
+                  <Typography variant="subtitle1" fontWeight="bold" color="primary.main">Mascotas para adoptar</Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    size="small"
+                    onClick={() => {
+                      const nuevaMascota = {
+                        id: crypto.randomUUID(),
+                        name: '',
+                        description: '',
+                        image: '',
+                        age: '',
+                        size: ''
+                      };
+                      setFormData(prev => ({
+                        ...prev,
+                        mascotas: [...(prev.mascotas || []), nuevaMascota]
+                      }));
+                    }}
+                    sx={{ ml: 'auto' }}
+                  >
+                    Agregar mascota
+                  </Button>
+                </Box>
+                <Grid container spacing={2}>
+                  {(formData.mascotas || []).map((mascota, idx) => (
+                    <Grid item xs={12} key={mascota.id || idx}>
+                      <Paper elevation={0} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, bgcolor: '#e0e7ef', borderRadius: 2 }}>
+                        <Avatar src={mascota.image} alt={mascota.name} sx={{ width: 50, height: 50, bgcolor: 'grey.100' }} variant="rounded" />
+                        <Box flexGrow={1}>
+                          <TextField
+                            label="Nombre"
+                            value={mascota.name}
+                            onChange={e => handleMascotaChange(idx, 'name', e.target.value)}
+                            fullWidth
+                            sx={{ mb: 1 }}
+                          />
+                          <TextField
+                            label="Descripción"
+                            value={mascota.description}
+                            onChange={e => handleMascotaChange(idx, 'description', e.target.value)}
+                            fullWidth
+                            multiline
+                            minRows={2}
+                          />
+                        </Box>
+                        <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
+                          <Button
+                            variant="text"
+                            component="label"
+                            size="small"
+                            sx={{ minWidth: 0 }}
+                          >
+                            <AddIcon fontSize="small" />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              hidden
+                              ref={el => (mascotaInputRefs.current[idx] = el)}
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  try {
+                                    const url = await uploadImage(file, `mascotas/${crypto.randomUUID()}-${file.name}`);
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      mascotas: prev.mascotas.map((m, i) => i === idx ? { ...m, image: url } : m)
+                                    }));
+                                    setSnackbar({ open: true, message: 'Foto de mascota subida', severity: 'success' });
+                                  } catch (err) {
+                                    setSnackbar({ open: true, message: 'Error al subir foto', severity: 'error' });
+                                  }
+                                }
+                              }}
+                            />
+                          </Button>
+                          <IconButton color="error" size="small" onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              mascotas: (prev.mascotas || []).filter((m, i) => i !== idx)
+                            }));
+                          }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Paper>
+            </Grid>
+
+            {/* Causas urgentes */}
             <Grid item xs={12}>
-              <TextField
-                name="name"
-                label="Nombre del refugio *"
-                fullWidth
-                value={formData.name}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                name="description"
-                label="Descripción *"
-                fullWidth
-                multiline
-                rows={3}
-                value={formData.description}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                name="address"
-                label="Dirección *"
-                fullWidth
-                value={formData.address}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                name="phone"
-                label="Teléfono *"
-                fullWidth
-                value={formData.phone}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                name="email"
-                label="Correo electrónico"
-                fullWidth
-                value={formData.email}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                name="bankAccount"
-                label="Cuenta bancaria"
-                fullWidth
-                value={formData.bankAccount}
-                onChange={handleFormChange}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                name="image"
-                label="URL de la imagen"
-                fullWidth
-                value={formData.image}
-                onChange={handleFormChange}
-                helperText="Ingrese la URL de una imagen para el refugio"
-              />
+              <Paper elevation={1} sx={{ p: 3, bgcolor: '#f1f5f9', borderRadius: 3 }}>
+                <Box mb={2} display="flex" alignItems="center" gap={1}>
+                  <Typography variant="subtitle1" fontWeight="bold" color="primary.main">Causas urgentes</Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    size="small"
+                    onClick={() => {
+                      const nuevaCausa = {
+                        id: crypto.randomUUID(),
+                        title: '',
+                        description: '',
+                        image: '',
+                        goal: 0,
+                        current: 0
+                      };
+                      setFormData(prev => ({
+                        ...prev,
+                        causas_urgentes: [...(prev.causas_urgentes || []), nuevaCausa]
+                      }));
+                    }}
+                    sx={{ ml: 'auto' }}
+                  >
+                    Agregar causa urgente
+                  </Button>
+                </Box>
+                <Grid container spacing={2}>
+                  {(formData.causas_urgentes || []).map((causa, idx) => (
+                    <Grid item xs={12} sm={6} md={4} key={causa.id || idx}>
+                      <Paper elevation={0} sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center', bgcolor: '#e0e7ef', borderRadius: 2 }}>
+                        <Avatar src={causa.image} alt={causa.title} sx={{ width: 48, height: 48, bgcolor: 'grey.100', mb: 1 }} variant="rounded" />
+                        <Button
+                          variant="text"
+                          component="label"
+                          size="small"
+                          sx={{ mb: 1 }}
+                        >
+                          <AddIcon fontSize="small" />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const url = await uploadImage(file, `causas/${crypto.randomUUID()}-${file.name}`);
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    causas_urgentes: prev.causas_urgentes.map((c, i) => i === idx ? { ...c, image: url } : c)
+                                  }));
+                                  setSnackbar({ open: true, message: 'Imagen de causa subida', severity: 'success' });
+                                } catch (err) {
+                                  setSnackbar({ open: true, message: 'Error al subir imagen', severity: 'error' });
+                                }
+                              }
+                            }}
+                          />
+                        </Button>
+                        <TextField
+                          label="Título"
+                          value={causa.title}
+                          onChange={e => handleCausaUrgenteChange(idx, 'title', e.target.value)}
+                          fullWidth
+                          sx={{ mb: 1 }}
+                        />
+                        <TextField
+                          label="Descripción"
+                          value={causa.description}
+                          onChange={e => handleCausaUrgenteChange(idx, 'description', e.target.value)}
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          sx={{ mb: 1 }}
+                        />
+                        <TextField
+                          label="Meta ($)"
+                          type="number"
+                          value={causa.goal}
+                          onChange={e => handleCausaUrgenteChange(idx, 'goal', parseInt(e.target.value) || 0)}
+                          fullWidth
+                          sx={{ mb: 1 }}
+                        />
+                        <TextField
+                          label="Monto actual ($)"
+                          type="number"
+                          value={causa.current}
+                          onChange={e => handleCausaUrgenteChange(idx, 'current', parseInt(e.target.value) || 0)}
+                          fullWidth
+                          sx={{ mb: 1 }}
+                        />
+                        <IconButton color="error" size="small" onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            causas_urgentes: (prev.causas_urgentes || []).filter((c, i) => i !== idx)
+                          }));
+                        }}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Paper>
             </Grid>
           </Grid>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancelar</Button>
-          <Button onClick={handleSubmit} variant="contained">
+        <DialogActions sx={{ bgcolor: '#f8fafc', px: 3, py: 2 }}>
+          <Button onClick={() => setOpenDialog(false)} variant="outlined">Cancelar</Button>
+          <Button onClick={handleSubmitRefugio} variant="contained" color="primary">
             {currentRefugio ? 'Actualizar' : 'Crear'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Diálogo de eliminación */}
-      <Dialog open={openDeleteDialog} onClose={handleCloseDeleteDialog}>
-        <DialogTitle>Confirmar eliminación</DialogTitle>
-        <DialogContent>
-          <Typography>
-            ¿Está seguro que desea eliminar el refugio "{currentRefugio?.name}"? Esta acción no se puede deshacer.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDeleteDialog}>Cancelar</Button>
-          <Button onClick={handleDeleteRefugio} color="error" variant="contained">
-            Eliminar
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Diálogo de visualización */}
-      <Dialog open={openViewDialog} onClose={handleCloseViewDialog} maxWidth="md" fullWidth>
-        <DialogTitle>{currentRefugio?.name}</DialogTitle>
-        <DialogContent>
-          {currentRefugio && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
-                <img 
-                  src={currentRefugio.image} 
-                  alt={currentRefugio.name} 
-                  style={{ width: '100%', borderRadius: '8px' }} 
-                />
-              </Grid>
-              <Grid item xs={12} md={8}>
-                <Typography variant="h6" gutterBottom>Información</Typography>
-                <Typography paragraph>{currentRefugio.description}</Typography>
-                
-                <Typography variant="subtitle1" fontWeight="bold">Dirección:</Typography>
-                <Typography paragraph>{currentRefugio.address}</Typography>
-                
-                <Typography variant="subtitle1" fontWeight="bold">Contacto:</Typography>
-                <Typography paragraph>
-                  Teléfono: {currentRefugio.phone}<br />
-                  Email: {currentRefugio.email || 'No disponible'}
-                </Typography>
-                
-                <Typography variant="subtitle1" fontWeight="bold">Datos bancarios:</Typography>
-                <Typography paragraph>{currentRefugio.bankAccount || 'No disponible'}</Typography>
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>Mascotas ({currentRefugio.pets.length})</Typography>
-                <Grid container spacing={2}>
-                  {currentRefugio.pets.map(pet => (
-                    <Grid item xs={12} sm={6} md={4} key={pet.id}>
-                      <Paper sx={{ p: 2, display: 'flex', alignItems: 'center' }}>
-                        <Avatar 
-                          src={pet.image} 
-                          alt={pet.name} 
-                          sx={{ width: 60, height: 60, mr: 2 }} 
-                          variant="rounded"
-                        />
-                        <Box>
-                          <Typography variant="subtitle1" fontWeight="bold">{pet.name}</Typography>
-                          <Typography variant="body2">{pet.age} · {pet.size}</Typography>
-                        </Box>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>Causas urgentes</Typography>
-                <Grid container spacing={2}>
-                  {currentRefugio.urgentCauses.map(cause => (
-                    <Grid item xs={12} key={cause.id}>
-                      <Paper sx={{ p: 2 }}>
-                        <Typography variant="subtitle1" fontWeight="bold">{cause.title}</Typography>
-                        <Typography paragraph>{cause.description}</Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                          <Box 
-                            sx={{ 
-                              flexGrow: 1, 
-                              bgcolor: '#eee', 
-                              borderRadius: 1, 
-                              mr: 2, 
-                              height: 10, 
-                              position: 'relative' 
-                            }}
-                          >
-                            <Box 
-                              sx={{ 
-                                position: 'absolute', 
-                                left: 0, 
-                                top: 0, 
-                                bottom: 0, 
-                                bgcolor: 'primary.main', 
-                                borderRadius: 1,
-                                width: `${(cause.current / cause.goal) * 100}%`
-                              }} 
-                            />
-                          </Box>
-                          <Typography variant="body2">
-                            ${cause.current} de ${cause.goal}
-                          </Typography>
-                        </Box>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseViewDialog}>Cerrar</Button>
-          <Button 
-            onClick={() => {
-              handleCloseViewDialog();
-              if (currentRefugio) {
-                handleOpenDialog(currentRefugio);
-              }
-            }} 
-            variant="contained"
-          >
-            Editar
           </Button>
         </DialogActions>
       </Dialog>
@@ -671,10 +617,10 @@ export default function Refugios() {
       <Snackbar 
         open={snackbar.open} 
         autoHideDuration={6000} 
-        onClose={handleCloseSnackbar}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
-        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+        <Alert onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} severity={snackbar.severity} sx={{ width: '100%' }}>
           {snackbar.message}
         </Alert>
       </Snackbar>

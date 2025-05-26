@@ -5,6 +5,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import AddPetModal from '@/components/AddPetModal';
 import EditPetModal from '@/components/EditPetModal';
+import UpgradeMembershipModal from '../components/UpgradeMembershipModal';
+import { router } from 'expo-router';
 
 // Definir el tipo para las mascotas
 type Pet = {
@@ -14,9 +16,71 @@ type Pet = {
   breed: string | null;
   age: string | null;
   description: string | null;
-  image_url: string | null;
+  images: string[];
   owner_id: string;
+  is_active: boolean;
+  featured?: boolean; // Agregar propiedad para destacar mascotas
 };
+
+// Definir el tipo para las membresías de usuario
+interface UserMembership {
+  membership_id: string;
+  membership_name: string;
+  max_pets: number;
+  max_photos_per_pet: number;
+  max_interests_per_pet: number;
+  has_ads: boolean;
+  has_coupons: boolean;
+  has_store_discounts: boolean;
+}
+
+// Definir el tipo para los banners
+interface Banner {
+  id: string;
+  title: string;
+  description?: string;
+  image_url: string;
+  link_url?: string;
+  target_section?: string;
+  start_date?: string;
+  end_date?: string;
+  is_active?: boolean;
+  priority?: number;
+  created_at?: string;
+  updated_at?: string;
+  buttonText?: string; // Para compatibilidad visual
+}
+
+// Definir el tipo para los anuncios
+interface Anuncio {
+  id: string;
+  titulo: string;
+  categoria: string;
+  tipo_aviso: string;
+  especie: string;
+  nombre: string;
+  ubicacion: string;
+  descripcion: string;
+  imagen_url: string;
+  imagenes_urls: string[];
+  destacado: boolean;
+  fecha_creacion: string;
+  usuario: {
+    nombre?: string;
+    telefono?: string;
+    email?: string;
+  };
+}
+
+// Tipo para negocios/places
+interface Place {
+  id: string;
+  name: string;
+  photo_url: string | null;
+  rating: number | null;
+  address?: string | null;
+  // ...otros campos relevantes
+}
 
 export default function Home() {
   const { width } = useWindowDimensions();
@@ -24,36 +88,33 @@ export default function Home() {
   const scrollViewRef = useRef(null);
   const [isAddPetModalVisible, setIsAddPetModalVisible] = useState(false);
   const [isEditPetModalVisible, setIsEditPetModalVisible] = useState(false);
+  const [isUpgradeModalVisible, setIsUpgradeModalVisible] = useState(false);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [pets, setPets] = useState<Pet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  
-  const banners = [
-    {
-      id: '1',
-      image: 'https://images.unsplash.com/photo-1450778869180-41d0601e046e',
-      title: 'Semana de Adopción de Mascotas',
-      subtitle: '50% de descuento en tarifas de adopción',
-      buttonText: 'Más información'
-    },
-    {
-      id: '2',
-      image: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e',
-      title: 'Adopta un Amigo Fiel',
-      subtitle: 'Encuentra tu compañero perfecto',
-      buttonText: 'Ver mascotas'
-    },
-    {
-      id: '3',
-      image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba',
-      title: 'Gatos en Adopción',
-      subtitle: 'Adopta un felino y cambia su vida',
-      buttonText: 'Conocer más'
-    }
-  ];
-  
+  const [userMembership, setUserMembership] = useState<UserMembership | null>(null);
+  const [checkingMembership, setCheckingMembership] = useState(false);
+  const [banners, setBanners] = useState<Banner[]>([]);
+  const [loadingBanners, setLoadingBanners] = useState(true);
+  const [anuncios, setAnuncios] = useState<Anuncio[]>([]);
+  const [loadingAnuncios, setLoadingAnuncios] = useState(true);
+  const [topPlaces, setTopPlaces] = useState<Place[]>([]);
+  const [loadingTopPlaces, setLoadingTopPlaces] = useState(true);
+  const [eventos, setEventos] = useState<any[]>([]);
+  const [loadingEventos, setLoadingEventos] = useState(true);
+
+  useEffect(() => {
+    const fetchBanners = async () => {
+      setLoadingBanners(true);
+      const { data, error } = await supabase.from('banners').select('*');
+      if (!error && data) setBanners(data);
+      setLoadingBanners(false);
+    };
+    fetchBanners();
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => {
       const nextIndex = (currentBannerIndex + 1) % banners.length;
@@ -61,7 +122,7 @@ export default function Home() {
       // Corregir el error de tipo para scrollViewRef.current
       if (scrollViewRef.current) {
         (scrollViewRef.current as any).scrollTo({
-          x: nextIndex * (width - 32 + 16),
+          x: nextIndex * (width - 40),
           animated: true
         });
       }
@@ -69,70 +130,64 @@ export default function Home() {
     
     return () => clearInterval(timer);
   }, [currentBannerIndex, width, banners.length]);
-  
+
   const handleScroll = (event: { nativeEvent: { contentOffset: { x: number } } }) => {
     const contentOffsetX = event.nativeEvent.contentOffset.x;
-    const newIndex = Math.round(contentOffsetX / (width - 32 + 16)); // Ajustamos el cálculo para incluir el margen
+    const newIndex = Math.round(contentOffsetX / (width - 40)); // Ajustamos el cálculo para incluir el margen
     if (newIndex !== currentBannerIndex && newIndex >= 0 && newIndex < banners.length) {
       setCurrentBannerIndex(newIndex);
     }
   };
-  
+
   // Función para cargar las mascotas del usuario
   const loadPets = useCallback(async () => {
-    try {
-      setError(null);
-      
-      // Verificar si el usuario está autenticado
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        throw new Error('Error al verificar la sesión: ' + sessionError.message);
-      }
-      
-      if (!session) {
-        // Si no hay sesión, mostrar mensaje pero no error
-        setPets([]);
-        setLoading(false);
-        return;
-      }
-      
-      console.log('Cargando mascotas para el usuario:', session.user.email);
-      
-      // Obtener las mascotas del usuario desde Supabase
-      const { data, error: petsError } = await supabase
-        .from('pets')
-        .select('*')
-        .eq('owner_id', session.user.id)
-        .order('name', { ascending: true });
-      
-      if (petsError) {
-        throw new Error('Error al cargar mascotas: ' + petsError.message);
-      }
-      
-      console.log('Mascotas cargadas:', data?.length || 0);
-      setPets(data || []);
-      
-    } catch (err: any) {
-      console.error('Error al cargar mascotas:', err);
-      setError(err.message || 'Error al cargar las mascotas');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    setLoading(true);
+    setError(null);
+    
+    // Verificar si el usuario está autenticado
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      throw new Error('Error al verificar la sesión: ' + sessionError.message);
     }
+    
+    if (!session) {
+      // Si no hay sesión, mostrar mensaje pero no error
+      setPets([]);
+      setLoading(false);
+      return;
+    }
+    
+    console.log('Cargando mascotas para el usuario:', session.user.email);
+    
+    // Obtener las mascotas del usuario desde Supabase
+    const { data, error: petsError } = await supabase
+      .from('pets')
+      .select('*')
+      .eq('owner_id', session.user.id);
+    
+    if (petsError) {
+      throw new Error('Error al cargar mascotas: ' + petsError.message);
+    }
+    
+    // Asegurar que cada mascota tenga is_active definido como booleano
+    const petsWithActive = (data || []).map(pet => ({ ...pet, is_active: !!pet.is_active }));
+    console.log('Mascotas cargadas:', petsWithActive);
+    setPets(petsWithActive);
+    setLoading(false);
   }, []);
-  
+
   // Cargar mascotas al iniciar y cuando se cierre el modal de agregar mascota
   useEffect(() => {
     loadPets();
   }, [loadPets]);
-  
+
   // Función para refrescar la lista de mascotas
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadPets();
   }, [loadPets]);
-  
+
   // Función para manejar cuando se agrega o edita una mascota exitosamente
   const handlePetUpdated = () => {
     loadPets();
@@ -144,6 +199,325 @@ export default function Home() {
     setIsEditPetModalVisible(true);
   };
 
+  // Función para manejar el error de límite de mascotas
+  const handlePetLimitError = () => {
+    setIsUpgradeModalVisible(true);
+  };
+
+  // Modifica la función de agregar mascota para mostrar el modal si hay error de límite
+  const handleAddPet = async (petData: Omit<Pet, 'id'>) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Debes iniciar sesión');
+      const { data, error } = await supabase
+        .from('pets')
+        .insert([{ ...petData, owner_id: session.user.id }]);
+      if (error) {
+        const msg = error.message || error.details || JSON.stringify(error);
+        if (
+          msg.toLowerCase().includes('límite') ||
+          msg.toLowerCase().includes('limit') ||
+          msg.toLowerCase().includes('has alcanzado el límite')
+        ) {
+          setIsAddPetModalVisible(false);
+          setTimeout(() => {
+            handlePetLimitError();
+          }, 350); // Espera a que se desmonte el modal antes de mostrar el de upgrade
+        } else {
+          setError(msg);
+        }
+        return;
+      }
+      setIsAddPetModalVisible(false);
+      loadPets();
+    } catch (err: any) {
+      setError(err.message || 'Error al agregar mascota');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cambiar el guardado y edición para soportar images[]
+  const handlePetEdited = async (petData: any) => {
+    try {
+      setLoading(true);
+      setError(null);
+      // Actualizar mascota con intereses y nuevas imágenes
+      const { data, error } = await supabase
+        .from('pets')
+        .update({
+          name: petData.name,
+          species: petData.species,
+          breed: petData.breed || null,
+          age: petData.age || null,
+          description: petData.description || null,
+          images: petData.images || [],
+          interests: petData.interests || [],
+        })
+        .eq('id', petData.id);
+      if (error) {
+        setError(error.message || 'No se pudo actualizar la mascota');
+        return;
+      }
+      setIsEditPetModalVisible(false);
+      setSelectedPet(null);
+      loadPets();
+    } catch (err: any) {
+      setError(err.message || 'Error al editar mascota');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Hook para membresía y máximo de mascotas
+  const loadUserMembership = async () => {
+    setCheckingMembership(true);
+    try {
+      const sessionResult = await supabase.auth.getSession();
+      const userId = sessionResult.data.session?.user?.id;
+      if (!userId) throw new Error('No hay sesión de usuario');
+      const { data, error } = await supabase.rpc('get_user_membership', { user_id: userId });
+      if (error) throw error;
+      if (data && data.length > 0) {
+        setUserMembership(data[0]);
+      } else {
+        setUserMembership(null);
+      }
+    } catch (e) {
+      setUserMembership(null);
+    } finally {
+      setCheckingMembership(false);
+    }
+  };
+
+  // Cargar membresía al montar
+  useEffect(() => {
+    loadUserMembership();
+  }, []);
+
+  // Nueva función para manejar click en Agregar Mascota
+  const handleClickAddPet = async () => {
+    setCheckingMembership(true);
+    await loadUserMembership();
+    if (!userMembership) {
+      Alert.alert('Error', 'No se pudo obtener la información de tu membresía');
+      setCheckingMembership(false);
+      return;
+    }
+    if (userMembership && pets.length >= userMembership.max_pets) {
+      setIsUpgradeModalVisible(true);
+      setCheckingMembership(false);
+      return;
+    }
+    setIsAddPetModalVisible(true);
+    setCheckingMembership(false);
+  };
+
+  useEffect(() => {
+    const fetchAnuncios = async () => {
+      setLoadingAnuncios(true);
+      try {
+        // Obtener avisos de la tabla red_de_ayuda con los campos necesarios
+        const { data: avisosData, error } = await supabase
+          .from('red_de_ayuda')
+          .select(`
+            id,
+            tipo_aviso,
+            especie,
+            nombre,
+            descripcion,
+            ubicacion,
+            imagen_url,
+            imagenes_urls,
+            contacto,
+            estado,
+            created_at,
+            user_id
+          `)
+          .eq('estado', 'activo')  // Solo traer avisos activos
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (error) throw error;
+        if (!avisosData) return;
+
+        // Obtener información de usuarios para los avisos
+        const userIds = [...new Set(avisosData.map(aviso => aviso.user_id))];
+        const { data: usuariosData } = await supabase
+          .from('profiles')
+          .select('id, nombre, telefono, email')
+          .in('id', userIds);
+
+        // Crear mapa de usuarios por ID
+        const usuariosMap = new Map(
+          (usuariosData || []).map(user => [user.id, user])
+        );
+        
+        // Mapear los datos al formato de Anuncio
+        const avisosMapeados = avisosData.map(aviso => {
+          const usuario = usuariosMap.get(aviso.user_id) || {} as any;
+          
+          return {
+            id: aviso.id,
+            titulo: aviso.tipo_aviso === 'adopcion' ? 'En adopción' : 
+                   aviso.tipo_aviso === 'perdido' ? 'Se perdió' : 'Se encontró',
+            categoria: aviso.tipo_aviso,
+            tipo_aviso: aviso.tipo_aviso,
+            especie: aviso.especie || 'No especificada',
+            nombre: aviso.nombre || 'Sin nombre',
+            ubicacion: aviso.ubicacion || 'Ubicación no especificada',
+            descripcion: aviso.descripcion || 'Sin descripción',
+            imagen_url: (aviso.imagenes_urls && aviso.imagenes_urls[0]) || 
+                       aviso.imagen_url || 
+                       'https://images.unsplash.com/photo-1517849845537-4d257902454a',
+            imagenes_urls: aviso.imagenes_urls || (aviso.imagen_url ? [aviso.imagen_url] : []),
+            destacado: false, // No existe este campo en la tabla
+            fecha_creacion: aviso.created_at || new Date().toISOString(),
+            usuario: {
+              nombre: usuario?.nombre || 'Usuario anónimo',
+              telefono: usuario?.telefono || aviso.contacto || 'Sin contacto',
+              email: usuario?.email || ''
+            }
+          };
+        });
+        
+        setAnuncios(avisosMapeados);
+      } catch (error) {
+        console.error('Error al cargar los anuncios:', error);
+      } finally {
+        setLoadingAnuncios(false);
+      }
+    };
+
+    fetchAnuncios();
+  }, []);
+
+  // Distintivo visual para las tarjetas de anuncio
+  const renderBadge = (anuncio: Anuncio) => {
+    let label = '';
+    let color = '#ffbc4c';
+    const categoria = anuncio.categoria?.toLowerCase() || '';
+    if (categoria === 'perdido') {
+      label = 'Perdido/a';
+      color = '#ff4c4c';
+    } else if (categoria === 'encontrado') {
+      label = '¡En Casa!';
+      color = '#4caf50';
+    } else if (categoria === 'adopción' || categoria === 'adopcion') {
+      label = '¡Adóptame!';
+      color = '#2196f3';
+    }
+    if (!label) return null;
+    return (
+      <View style={{
+        position: 'absolute',
+        top: 12,
+        left: 12,
+        backgroundColor: color,
+        borderRadius: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        zIndex: 2,
+      }}>
+        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{label}</Text>
+      </View>
+    );
+  };
+
+  useEffect(() => {
+    const fetchTopPlaces = async () => {
+      setLoadingTopPlaces(true);
+      // Traer rating actualizado de la base de datos
+      const { data, error } = await supabase
+        .from('places')
+        .select('id, name, photo_url, rating, address')
+        .order('rating', { ascending: false })
+        .limit(5);
+      if (!error && data) setTopPlaces(data);
+      setLoadingTopPlaces(false);
+    };
+    fetchTopPlaces();
+  }, []);
+
+  useEffect(() => {
+    const focusHandler = () => {
+      // Si viene de un rating, fuerza recarga
+      if (router?.params?.refreshTop === '1') {
+        fetchTopPlaces();
+        // Limpia el parámetro para evitar recargas infinitas
+        router.setParams({ refreshTop: undefined });
+      }
+    };
+    // Suscribirse al evento de focus
+    const unsubscribe = router.addListener?.('focus', focusHandler);
+    return () => unsubscribe?.();
+  }, [router]);
+
+  useEffect(() => {
+    const unsubscribe = router.events?.addListener?.('focus', () => {
+      // Recargar negocios top al volver a la pantalla principal
+      (async () => {
+        setLoadingTopPlaces(true);
+        const { data, error } = await supabase
+          .from('places')
+          .select('id, name, photo_url, rating, address')
+          .order('rating', { ascending: false })
+          .limit(5);
+        if (!error && data) setTopPlaces(data);
+        setLoadingTopPlaces(false);
+      })();
+    });
+    return () => unsubscribe?.();
+  }, [router]);
+
+  useEffect(() => {
+    const fetchEventos = async () => {
+      setLoadingEventos(true);
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('is_active', true)
+        .gte('event_date', new Date().toISOString().split('T')[0])
+        .order('event_date', { ascending: true })
+        .limit(5);
+      if (!error && data) setEventos(data);
+      setLoadingEventos(false);
+    };
+    fetchEventos();
+  }, []);
+
+  function formatEventDate(dateString: string) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+  }
+
+  // Añadir el distintivo de mascota destacada en la tarjeta de mascota
+  const FeaturedPetBadge = () => (
+    <View style={{
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      backgroundColor: '#FFD700',
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      zIndex: 2,
+      borderWidth: 2,
+      borderColor: '#fff',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.13,
+      shadowRadius: 2,
+      elevation: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+    }}>
+      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>★ DESTACADA</Text>
+    </View>
+  );
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView 
@@ -152,48 +526,65 @@ export default function Home() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Featured Banner Carousel */}
-        <View style={styles.bannerContainer}>
-          <ScrollView
-            ref={scrollViewRef}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            style={styles.bannerCarousel}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            decelerationRate="fast"
-            snapToInterval={width - 32}
-            snapToAlignment="center"
-            contentContainerStyle={styles.bannerCarouselContent}
-          >
-            {banners.map((banner) => (
-              <View key={banner.id} style={[styles.banner, { width: width - 32, marginRight: 16 }]}>
+        {/* Sección de banners con datos reales y diseño mejorado */}
+        <View style={{ marginTop: 24 }}>
+          {loadingBanners ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#ffbc4c" />
+              <Text style={styles.loadingText}>Cargando banners...</Text>
+            </View>
+          ) : banners.length === 0 ? (
+            <Text style={{ color: '#888', textAlign: 'center' }}>No hay banners disponibles</Text>
+          ) : (
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+              {/* Flecha izquierda */}
+              {banners.length > 1 && (
+                <TouchableOpacity
+                  onPress={() => setCurrentBannerIndex((prev) => prev === 0 ? banners.length - 1 : prev - 1)}
+                  style={{ padding: 8 }}
+                >
+                  <ArrowRight size={24} color="#ffbc4c" style={{ transform: [{ rotate: '180deg' }] }} />
+                </TouchableOpacity>
+              )}
+              <View style={{ width: width - 40, borderRadius: 16, overflow: 'hidden', backgroundColor: '#fff', elevation: 2 }}>
                 <Image
-                  source={{ uri: banner.image }}
-                  style={styles.bannerImage}
+                  source={{ uri: banners[currentBannerIndex].image_url || 'https://images.unsplash.com/photo-1517849845537-4d257902454a' }}
+                  style={{ width: '100%', height: 180, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}
+                  resizeMode="cover"
+                  onError={e => {}}
                 />
                 <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.8)']}
-                  style={styles.bannerContent}>
-                  <Text style={styles.bannerTitle}>{banner.title}</Text>
-                  <Text style={styles.bannerSubtitle}>{banner.subtitle}</Text>
-                  <TouchableOpacity style={styles.bannerButton}>
-                    <Text style={styles.bannerButtonText}>{banner.buttonText}</Text>
-                  </TouchableOpacity>
+                  colors={[ 'transparent', 'rgba(0,0,0,0.8)' ]}
+                  style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 90, borderBottomLeftRadius: 16, borderBottomRightRadius: 16 }}
+                >
+                  <View style={{ padding: 16, justifyContent: 'flex-end', flex: 1 }}>
+                    <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 4 }}>{banners[currentBannerIndex].title}</Text>
+                    <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8 }}>{banners[currentBannerIndex].description}</Text>
+                    {banners[currentBannerIndex].buttonText && (
+                      <TouchableOpacity style={{ backgroundColor: '#ffbc4c', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, alignSelf: 'flex-start' }}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{banners[currentBannerIndex].buttonText}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </LinearGradient>
               </View>
-            ))}
-          </ScrollView>
-          
-          {/* Pagination Indicators */}
+              {/* Flecha derecha */}
+              {banners.length > 1 && (
+                <TouchableOpacity
+                  onPress={() => setCurrentBannerIndex((prev) => prev === banners.length - 1 ? 0 : prev + 1)}
+                  style={{ padding: 8 }}
+                >
+                  <ArrowRight size={24} color="#ffbc4c" />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+          {/* Indicadores de paginación */}
           <View style={styles.paginationContainer}>
-            {banners.map((banner) => (
-              <View 
-                key={banner.id} 
-                style={[styles.paginationDot, 
-                  currentBannerIndex === banners.findIndex(b => b.id === banner.id) ? styles.paginationDotActive : null
-                ]} 
+            {banners.map((banner, i) => (
+              <View
+                key={banner.id}
+                style={[styles.paginationDot, currentBannerIndex === i && styles.paginationDotActive]}
               />
             ))}
           </View>
@@ -226,7 +617,7 @@ export default function Home() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.petsScroll}>
               <TouchableOpacity 
                 style={styles.addPetCard} 
-                onPress={() => setIsAddPetModalVisible(true)}
+                onPress={handleClickAddPet}
               >
                 <View style={styles.addPetButton}>
                   <Text style={styles.addPetIcon}>+</Text>
@@ -242,12 +633,22 @@ export default function Home() {
                 pets.map(pet => (
                   <TouchableOpacity 
                     key={pet.id} 
-                    style={styles.petCard}
+                    style={[
+                      styles.petCard, 
+                      pet.is_active === false && { opacity: 0.5, backgroundColor: '#eee' },
+                      pet.featured && { borderColor: '#FFD700', borderWidth: 2, shadowColor: '#FFD700', shadowOpacity: 0.25, elevation: 4 }
+                    ]}
                     onPress={() => handleEditPet(pet)}
                   >
+                    {/* Badge de destacada */}
+                    {pet.featured && <FeaturedPetBadge />}
                     <Image
-                      source={{ 
-                        uri: pet.image_url || 'https://images.unsplash.com/photo-1517849845537-4d257902454a' 
+                      source={{
+                        uri: pet.image_url
+                          ? pet.image_url
+                          : (Array.isArray(pet.images) && pet.images.length > 0 && pet.images[0])
+                            ? pet.images[0]
+                            : 'https://images.unsplash.com/photo-1517849845537-4d257902454a'
                       }}
                       style={styles.petCardImage}
                     />
@@ -256,6 +657,11 @@ export default function Home() {
                       <Text style={styles.petCardBreed}>
                         {pet.species} {pet.breed ? `• ${pet.breed}` : ''} {pet.age ? `• ${pet.age}` : ''}
                       </Text>
+                      {pet.is_active === false && (
+                        <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                          Mascota inactiva
+                        </Text>
+                      )}
                     </View>
                   </TouchableOpacity>
                 ))
@@ -264,47 +670,52 @@ export default function Home() {
           )}
         </View>
 
-        {/* Anuncios */}
+        {/* Red de Ayuda */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Anuncios</Text>
-            <TouchableOpacity style={styles.seeAllButton}>
+            <Text style={styles.sectionTitle}>Red de Ayuda</Text>
+            <TouchableOpacity style={styles.seeAllButton} onPress={() => router.push('/red-de-ayuda')}>
               <Text style={styles.seeAllText}>Ver todos</Text>
               <ArrowRight size={16} color="#ffbc4c" />
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.petsScroll}>
-            <TouchableOpacity style={styles.petCard}>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1517849845537-4d257902454a' }}
-                style={styles.petCardImage}
-              />
-              <View style={styles.petCardInfo}>
-                <Text style={styles.petCardName}>Descuento Especial</Text>
-                <Text style={styles.petCardBreed}>Alimentos Premium</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.petCard}>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba' }}
-                style={styles.petCardImage}
-              />
-              <View style={styles.petCardInfo}>
-                <Text style={styles.petCardName}>Oferta Exclusiva</Text>
-                <Text style={styles.petCardBreed}>Accesorios para Mascotas</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.petCard}>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e' }}
-                style={styles.petCardImage}
-              />
-              <View style={styles.petCardInfo}>
-                <Text style={styles.petCardName}>Promoción Especial</Text>
-                <Text style={styles.petCardBreed}>Servicios Veterinarios</Text>
-              </View>
-            </TouchableOpacity>
-          </ScrollView>
+          {loadingAnuncios ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#ffbc4c" />
+              <Text style={styles.loadingText}>Cargando anuncios...</Text>
+            </View>
+          ) : anuncios.length === 0 ? (
+            <View style={styles.noPetsContainer}>
+              <Text style={styles.noPetsText}>No hay avisos disponibles</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.petsScroll}>
+              {anuncios.map(anuncio => (
+                <TouchableOpacity 
+                  style={styles.petCard} 
+                  key={anuncio.id}
+                  onPress={() => router.push(`/red-de-ayuda?avisoId=${anuncio.id}`)}
+                >
+                  {renderBadge(anuncio)}
+                  <Image
+                    source={{ uri: anuncio.imagen_url }}
+                    style={styles.petCardImage}
+                  />
+                  <View style={styles.petCardInfo}>
+                    <Text style={styles.petCardName} numberOfLines={1}>
+                      {anuncio.nombre || 'Sin nombre'}
+                    </Text>
+                    <Text style={styles.petCardBreed} numberOfLines={1}>
+                      {anuncio.tipo_aviso} • {anuncio.especie}
+                    </Text>
+                    <Text style={styles.petCardLocation} numberOfLines={1}>
+                      {anuncio.ubicacion || 'Ubicación no especificada'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {/* Featured Deals */}
@@ -312,16 +723,12 @@ export default function Home() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Ofertas Especiales</Text>
             <TouchableOpacity style={styles.seeAllButton}>
-              <Text style={styles.seeAllText}>Ver todas</Text>
+              <Text style={styles.seeAllText}>Ver todos</Text>
               <ArrowRight size={16} color="#ffbc4c" />
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dealsScroll}>
             <TouchableOpacity style={styles.dealCard}>
-              <View style={styles.discountBadge}>
-                <Tag size={14} color="#fff" />
-                <Text style={styles.discountText}>30% DCTO</Text>
-              </View>
               <Image
                 source={{ uri: 'https://images.unsplash.com/photo-1589924691995-400dc9ecc119' }}
                 style={styles.dealImage}
@@ -335,10 +742,6 @@ export default function Home() {
               </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dealCard}>
-              <View style={styles.discountBadge}>
-                <Tag size={14} color="#fff" />
-                <Text style={styles.discountText}>20% DCTO</Text>
-              </View>
               <Image
                 source={{ uri: 'https://images.unsplash.com/photo-1545249390-6bdfa286564f' }}
                 style={styles.dealImage}
@@ -358,143 +761,114 @@ export default function Home() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Próximos Eventos</Text>
-            <TouchableOpacity style={styles.seeAllButton}>
+            <TouchableOpacity style={styles.seeAllButton} onPress={() => router.push('/eventos')}>
               <Text style={styles.seeAllText}>Ver todos</Text>
               <ArrowRight size={16} color="#ffbc4c" />
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventsScroll}>
-            <TouchableOpacity style={styles.eventCard}>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1576201836106-db1758fd1c97' }}
-                style={styles.eventImage}
-              />
-              <View style={styles.eventInfo}>
-                <Text style={styles.eventDate}>15 de junio</Text>
-                <Text style={styles.eventTitle}>Día de Vacunación de Mascotas</Text>
-                <View style={styles.eventLocation}>
-                  <MapPin size={14} color="#666" />
-                  <Text style={styles.eventLocationText}>Parque Central</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.eventCard}>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec' }}
-                style={styles.eventImage}
-              />
-              <View style={styles.eventInfo}>
-                <Text style={styles.eventDate}>20 de junio</Text>
-                <Text style={styles.eventTitle}>Taller de Entrenamiento Canino</Text>
-                <View style={styles.eventLocation}>
-                  <MapPin size={14} color="#666" />
-                  <Text style={styles.eventLocationText}>Sede Pet Club</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </ScrollView>
+          {loadingEventos ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#ffbc4c" />
+              <Text style={styles.loadingText}>Cargando eventos...</Text>
+            </View>
+          ) : eventos.length === 0 ? (
+            <View style={styles.noPetsContainer}>
+              <Text style={styles.noPetsText}>No hay eventos próximos</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventsScroll}>
+              {eventos.map(evento => (
+                <TouchableOpacity style={styles.eventCard} key={evento.id}>
+                  <Image
+                    source={{ uri: evento.image_url || 'https://images.unsplash.com/photo-1517849845537-4d257902454a' }}
+                    style={styles.eventImage}
+                  />
+                  <View style={styles.eventInfo}>
+                    <Text style={styles.eventDate}>{formatEventDate(evento.event_date)}</Text>
+                    <Text style={styles.eventTitle} numberOfLines={2}>{evento.title}</Text>
+                    <View style={styles.eventLocation}>
+                      <MapPin size={14} color="#666" />
+                      <Text style={styles.eventLocationText} numberOfLines={1}>{evento.location}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
-        {/* Featured Deals */}
-        <View style={styles.section}>
+        {/* Featured Services */}
+        <View style={[styles.section, styles.lastSection]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Ofertas Especiales</Text>
-            <TouchableOpacity style={styles.seeAllButton}>
-              <Text style={styles.seeAllText}>Ver todas</Text>
+            <Text style={styles.sectionTitle}>Servicios Mejor Valorados</Text>
+            <TouchableOpacity style={styles.seeAllButton} onPress={() => router.push('/places')}>
+              <Text style={styles.seeAllText}>Ver todos</Text>
               <ArrowRight size={16} color="#ffbc4c" />
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dealsScroll}>
-            <TouchableOpacity style={styles.dealCard}>
-              <View style={styles.discountBadge}>
-                <Tag size={14} color="#fff" />
-                <Text style={styles.discountText}>30% DCTO</Text>
-              </View>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1589924691995-400dc9ecc119' }}
-                style={styles.dealImage}
-              />
-              <View style={styles.dealInfo}>
-                <Text style={styles.dealTitle}>Alimento Premium</Text>
-                <View style={styles.dealPricing}>
-                  <Text style={styles.dealOriginalPrice}>$49.99</Text>
-                  <Text style={styles.dealPrice}>$34.99</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.dealCard}>
-              <View style={styles.discountBadge}>
-                <Tag size={14} color="#fff" />
-                <Text style={styles.discountText}>20% DCTO</Text>
-              </View>
-              <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1545249390-6bdfa286564f' }}
-                style={styles.dealImage}
-              />
-              <View style={styles.dealInfo}>
-                <Text style={styles.dealTitle}>Casa para Gatos</Text>
-                <View style={styles.dealPricing}>
-                  <Text style={styles.dealOriginalPrice}>$89.99</Text>
-                  <Text style={styles.dealPrice}>$71.99</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </ScrollView>
-
-          {/* Featured Services */}
-          <View style={[styles.section, styles.lastSection]}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Servicios Mejor Valorados</Text>
-              <TouchableOpacity style={styles.seeAllButton}>
-                <Text style={styles.seeAllText}>Ver todos</Text>
-                <ArrowRight size={16} color="#ffbc4c" />
-              </TouchableOpacity>
+          {loadingTopPlaces ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#ffbc4c" />
+              <Text style={styles.loadingText}>Cargando negocios...</Text>
             </View>
+          ) : topPlaces.length === 0 ? (
+            <View style={styles.noPetsContainer}>
+              <Text style={styles.noPetsText}>No hay negocios disponibles</Text>
+            </View>
+          ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.servicesScroll}>
-              <TouchableOpacity style={styles.serviceCard}>
-                <Image
-                  source={{ uri: 'https://images.unsplash.com/photo-1516734212186-65266f683123' }}
-                  style={styles.serviceImage}
-                />
-                <View style={styles.serviceInfo}>
-                  <Text style={styles.serviceTitle}>Peluquería Patitas</Text>
-                  <View style={styles.serviceRating}>
-                    <Star size={14} color="#FFD700" fill="#FFD700" />
-                    <Text style={styles.serviceRatingText}>4.8</Text>
+              {topPlaces.map(place => (
+                <TouchableOpacity
+                  style={styles.serviceCard}
+                  key={place.id}
+                  onPress={() => router.push(`/places/${place.id}`)}
+                >
+                  <Image
+                    source={{ uri: place.photo_url || 'https://images.unsplash.com/photo-1516734212186-65266f683123' }}
+                    style={styles.serviceImage}
+                  />
+                  <View style={styles.serviceInfo}>
+                    <Text style={styles.serviceTitle}>{place.name}</Text>
+                    <View style={styles.serviceRating}>
+                      <Star size={14} color="#FFD700" fill="#FFD700" />
+                      <Text style={styles.serviceRatingText}>
+                        {place.rating !== null ? place.rating.toFixed(1) : '—'}
+                      </Text>
+                    </View>
+                    {/* Puedes mostrar dirección o más info aquí si quieres */}
                   </View>
-                  <Text style={styles.serviceDistance}>a 1.5 km</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.serviceCard}>
-                <Image
-                  source={{ uri: 'https://images.unsplash.com/photo-1532938911079-1b06ac7ceec7' }}
-                  style={styles.serviceImage}
-                />
-                <View style={styles.serviceInfo}>
-                  <Text style={styles.serviceTitle}>VetCare Plus</Text>
-                  <View style={styles.serviceRating}>
-                    <Star size={14} color="#FFD700" fill="#FFD700" />
-                    <Text style={styles.serviceRatingText}>4.9</Text>
-                  </View>
-                  <Text style={styles.serviceDistance}>a 2.3 km</Text>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
             </ScrollView>
-          </View>
+          )}
         </View>
       </ScrollView>
       
       <AddPetModal 
         visible={isAddPetModalVisible} 
         onClose={() => setIsAddPetModalVisible(false)}
-        onSuccess={handlePetUpdated}
+        onAddPet={handleAddPet}
+        maxImages={userMembership?.max_photos_per_pet || 1}
       />
 
       <EditPetModal
         visible={isEditPetModalVisible}
-        onClose={() => setIsEditPetModalVisible(false)}
-        onSuccess={handlePetUpdated}
-        pet={selectedPet}
+        pet={selectedPet ?? {}}
+        onClose={() => {
+          setIsEditPetModalVisible(false);
+          setSelectedPet(null);
+        }}
+        onEditPet={handlePetEdited}
+        maxImages={userMembership?.max_photos_per_pet || 1}
+      />
+
+      <UpgradeMembershipModal
+        visible={isUpgradeModalVisible}
+        onClose={() => setIsUpgradeModalVisible(false)}
+        onUpgrade={() => {
+          setIsUpgradeModalVisible(false);
+          router.push('/memberships');
+        }}
       />
     </View>
   );
@@ -540,43 +914,12 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
-  bannerContainer: {
-    marginVertical: 20,
-    position: 'relative',
-  },
-  bannerCarousel: {
-    overflow: 'visible',
-  },
-  bannerCarouselContent: {
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-  },
   banner: {
     height: 200,
     position: 'relative',
     borderRadius: 16,
     overflow: 'hidden',
     marginHorizontal: 8,
-  },
-  paginationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  paginationDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ccc',
-    marginHorizontal: 4,
-  },
-  paginationDotActive: {
-    backgroundColor: '#ffbc4c',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
   },
   bannerImage: {
     width: '100%',
@@ -612,6 +955,26 @@ const styles = StyleSheet.create({
   bannerButtonText: {
     color: '#fff',
     fontFamily: 'Inter_600SemiBold',
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ccc',
+    marginHorizontal: 4,
+  },
+  paginationDotActive: {
+    backgroundColor: '#ffbc4c',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
   section: {
     padding: 20,
@@ -710,6 +1073,12 @@ const styles = StyleSheet.create({
   },
   petCardBreed: {
     color: '#666',
+    fontFamily: 'Inter_400Regular',
+    marginBottom: 2,
+  },
+  petCardLocation: {
+    color: '#888',
+    fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
   dealsScroll: {

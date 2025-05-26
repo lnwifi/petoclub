@@ -158,3 +158,28 @@ export async function uploadImage(uri: string, setUploadProgress?: (progress: nu
     throw error;
   }
 }
+
+/**
+ * Elimina una imagen del bucket de Supabase Storage
+ * @param publicUrl URL pública de la imagen
+ * @returns void
+ */
+export async function deleteImageByPublicUrl(publicUrl: string): Promise<void> {
+  try {
+    // Extraer la ruta relativa del archivo desde la URL pública
+    // Ejemplo: https://xxxx.supabase.co/storage/v1/object/public/pet-images/pets/USERID/pet_123456.jpg
+    const match = publicUrl.match(/\/pet-images\/(.*)$/);
+    if (!match || !match[1]) {
+      throw new Error('No se pudo extraer la ruta del archivo del publicUrl');
+    }
+    const filePath = match[1];
+    // Eliminar el archivo del bucket
+    const { error } = await supabase.storage.from('pet-images').remove([filePath]);
+    if (error) {
+      throw new Error('Error al eliminar la imagen del bucket: ' + error.message);
+    }
+  } catch (err) {
+    console.error('[ERROR] No se pudo eliminar la imagen del bucket:', err);
+    throw err;
+  }
+}

@@ -2,9 +2,9 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { Alert } from 'react-native';
 
 // Configuración básica
-const WOOCOMMERCE_URL = 'https://petoclub.com.ar';
-const WOOCOMMERCE_KEY = process.env.EXPO_PUBLIC_WOOCOMMERCE_KEY || '';
-const WOOCOMMERCE_SECRET = process.env.EXPO_PUBLIC_WOOCOMMERCE_SECRET || '';
+const WOOCOMMERCE_URL = process.env.EXPO_PUBLIC_WOOCOMMERCE_URL || 'https://petoclub.com.ar';
+const WOOCOMMERCE_KEY = process.env.EXPO_PUBLIC_WOOCOMMERCE_KEY;
+const WOOCOMMERCE_SECRET = process.env.EXPO_PUBLIC_WOOCOMMERCE_SECRET;
 const API_VERSION = 'wc/v3';
 
 // Configuración de la API de WooCommerce usando la biblioteca

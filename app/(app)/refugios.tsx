@@ -1,8 +1,9 @@
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Modal } from 'react-native';
 import { MapPin, Star, Phone, Heart } from 'lucide-react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Stack } from 'expo-router';
 import RefugioDetalle from '@/components/RefugioDetalle';
+import { supabase } from '../lib/supabase';
 
 // Tipos
 type Pet = {
@@ -36,103 +37,34 @@ type Refugio = {
   email?: string;
 };
 
-const refugios: Refugio[] = [
-  {
-    id: '1',
-    name: 'Refugio Patitas Felices',
-    image: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b',
-    rating: 4.9,
-    address: 'Av. Libertador 1234',
-    phone: '+54 11 1234 5678',
-    description: 'Refugio dedicado a perros y gatos abandonados. Ofrecemos adopción responsable.',
-    pets: [
-      {
-        id: 'p1',
-        name: 'Luna',
-        image: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1',
-        description: 'Perrita dulce y juguetona',
-        age: '2 años',
-        size: 'Mediano'
-      },
-      {
-        id: 'p2',
-        name: 'Simba',
-        image: 'https://images.unsplash.com/photo-1573865526739-10659fec78a5',
-        description: 'Gatito muy cariñoso',
-        age: '6 meses',
-        size: 'Pequeño'
-      }
-    ],
-    urgentCauses: [
-      {
-        id: 'c1',
-        title: 'Alimentos para el invierno',
-        description: 'Necesitamos juntar alimentos para nuestros peludos',
-        goal: 50000,
-        current: 25000
-      }
-    ]
-  },
-  {
-    id: '2',
-    name: 'Hogar de Mascotas',
-    image: 'https://images.unsplash.com/photo-1601758124510-52d02ddb7cbd',
-    rating: 4.7,
-    address: 'Calle San Martín 567',
-    phone: '+54 11 8765 4321',
-    description: 'Rescatamos animales en situación de calle y les buscamos un hogar amoroso.',
-    pets: [
-      {
-        id: 'p3',
-        name: 'Rocky',
-        image: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb',
-        description: 'Perro adulto muy tranquilo',
-        age: '5 años',
-        size: 'Grande'
-      }
-    ],
-    urgentCauses: [
-      {
-        id: 'c2',
-        title: 'Campaña de vacunación',
-        description: 'Ayudanos a vacunar a todos nuestros rescatados',
-        goal: 30000,
-        current: 15000
-      }
-    ]
-  },
-  {
-    id: '3',
-    name: 'Refugio Huellitas',
-    image: 'https://images.unsplash.com/photo-1541781774459-bb2af2f05b55',
-    rating: 4.8,
-    address: 'Av. Rivadavia 890',
-    phone: '+54 11 2468 1357',
-    description: 'Más de 10 años rescatando y rehabilitando animales para darlos en adopción.',
-    pets: [
-      {
-        id: 'p4',
-        name: 'Milo',
-        image: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba',
-        description: 'Gatito juguetón',
-        age: '1 año',
-        size: 'Pequeño'
-      }
-    ],
-    urgentCauses: [
-      {
-        id: 'c3',
-        title: 'Reparación del refugio',
-        description: 'Necesitamos arreglar techos y paredes',
-        goal: 100000,
-        current: 45000
-      }
-    ]
-  },
-];
-
 export default function Refugios() {
+  const [refugios, setRefugios] = useState<Refugio[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedRefugio, setSelectedRefugio] = useState<Refugio | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [currentRefugio, setCurrentRefugio] = useState<Refugio | null>(null);
+
+  useEffect(() => {
+    const fetchRefugios = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('refugios')
+        .select('*')
+        .order('name');
+      // Asegura que pets siempre sea igual a mascotas de Supabase
+      const refugios = (data || []).map(r => ({
+        ...r,
+        pets: Array.isArray(r.mascotas) ? r.mascotas : [],
+        urgentCauses: Array.isArray(r.causas_urgentes) ? r.causas_urgentes : [],
+      }));
+      setRefugios(refugios);
+      setLoading(false);
+    };
+    fetchRefugios();
+  }, []);
+
+  if (loading) return <Text style={{textAlign:'center',marginTop:40}}>Cargando refugios...</Text>;
+  if (!refugios.length) return <Text style={{textAlign:'center',marginTop:40}}>No hay refugios registrados.</Text>;
 
   return (
     <View style={styles.container}>
@@ -170,10 +102,26 @@ export default function Refugios() {
                 <Phone size={16} color="#666" />
                 <Text style={styles.info}>{item.phone}</Text>
               </View>
+              {item.email && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.info}>{item.email}</Text>
+                </View>
+              )}
+              {item.bankAccount && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.info}>{item.bankAccount}</Text>
+                </View>
+              )}
               <View style={styles.petInfo}>
-                <Text style={styles.petCount}>{item.pets.length} mascotas en adopción</Text>
+                <Text style={styles.petCount}>{(Array.isArray(item.pets) ? item.pets.length : 0)} mascotas en adopción</Text>
               </View>
-              <TouchableOpacity style={styles.donateButton}>
+              <TouchableOpacity 
+                style={styles.donateButton}
+                onPress={() => {
+                  setCurrentRefugio(item);
+                  setShowDetails(true);
+                }}
+              >
                 <Heart size={16} color="#fff" />
                 <Text style={styles.donateButtonText}>Apoyar</Text>
               </TouchableOpacity>
@@ -197,6 +145,24 @@ export default function Refugios() {
               email: selectedRefugio.email || 'contacto@refugio.com'
             }}
             onClose={() => setSelectedRefugio(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        visible={showDetails}
+        animationType="slide"
+        onRequestClose={() => setShowDetails(false)}
+      >
+        {currentRefugio && (
+          <RefugioDetalle
+            refugio={{
+              ...currentRefugio,
+              location: currentRefugio.address,
+              bankAccount: currentRefugio.bankAccount || 'Cuenta Bancaria: XXX-XXXXX-X',
+              email: currentRefugio.email || 'contacto@refugio.com'
+            }}
+            onClose={() => setShowDetails(false)}
           />
         )}
       </Modal>

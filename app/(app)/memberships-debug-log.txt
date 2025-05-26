@@ -1,0 +1,15 @@
+// Debug log para memberships
+// Agrega esto temporalmente para imprimir los ids y nombres de los tipos y el id de la membresía activa
+
+export function debugMembershipTypesAndUser(membershipTypes, userMembership) {
+  console.log('DEBUG MEMBERSHIP TYPES:');
+  membershipTypes.forEach((type, idx) => {
+    console.log(`Tipo ${idx}: id=${type.id}, name=${type.name}`);
+  });
+  console.log('DEBUG USER MEMBERSHIP:');
+  if (userMembership) {
+    console.log(`userMembership.membership_id=${userMembership.membership_id}, membership_name=${userMembership.membership_name}`);
+  } else {
+    console.log('userMembership=null');
+  }
+}

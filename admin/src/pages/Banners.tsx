@@ -264,7 +264,7 @@ export default function Banners() {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('is_admin')
-        .eq('id', session.user.id)
+        .eq('user_id', session.user.id)
         .single();
 
       if (profileError) {
@@ -341,7 +341,7 @@ export default function Banners() {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('is_admin')
-        .eq('id', session.user.id)
+        .eq('user_id', session.user.id)
         .single();
 
       if (profileError) throw profileError;
@@ -499,7 +499,7 @@ export default function Banners() {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('is_admin')
-        .eq('id', session.user.id)
+        .eq('user_id', session.user.id)
         .single();
 
       if (profileError) {
@@ -544,19 +544,18 @@ export default function Banners() {
         <Typography variant="h4" gutterBottom fontWeight="600">
           Banners Promocionales
         </Typography>
-        {isAdmin && (
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />}
-            onClick={() => handleOpenDialog()}
-            sx={{ 
-              display: 'block',
-              marginRight: 0
-            }}
-          >
-            Nuevo Banner
-          </Button>
-        )}
+        {/* FORZAR BOTÓN SIEMPRE VISIBLE PARA DEBUG */}
+        <Button 
+          variant="contained" 
+          startIcon={<AddIcon />}
+          onClick={() => handleOpenDialog()}
+          sx={{ 
+            display: 'block',
+            marginRight: 0
+          }}
+        >
+          Nuevo Banner
+        </Button>
       </Box>
 
       <TableContainer component={Paper}>
@@ -616,6 +615,201 @@ export default function Banners() {
       </TableContainer>
 
       {/* Dialogos y otros componentes */}
+      {/* --- FORMULARIO MODAL PARA CREAR/EDITAR BANNER --- */}
+      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>{currentBanner ? 'Editar Banner' : 'Nuevo Banner'}</DialogTitle>
+        <DialogContent>
+          <Box component="form" sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Título"
+              name="title"
+              value={formData.title}
+              onChange={handleFormChange}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Descripción"
+              name="description"
+              value={formData.description}
+              onChange={handleFormChange}
+              fullWidth
+              multiline
+              rows={2}
+            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Button
+                variant="outlined"
+                component="label"
+                startIcon={<UploadIcon />}
+                sx={{ minWidth: 160 }}
+              >
+                Subir Imagen
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    // Subir a Supabase Storage
+                    const fileName = `banner_${Date.now()}_${file.name}`;
+                    const { data, error } = await supabase.storage
+                      .from('banners')
+                      .upload(fileName, file, { upsert: true });
+                    if (error) {
+                      setSnackbar({ open: true, message: 'Error al subir la imagen', severity: 'error' });
+                    } else {
+                      // Obtener URL pública
+                      const { data: publicUrl } = supabase.storage.from('banners').getPublicUrl(fileName);
+                      setFormData(prev => ({ ...prev, image_url: publicUrl.publicUrl }));
+                      setSnackbar({ open: true, message: 'Imagen subida correctamente', severity: 'success' });
+                    }
+                  }}
+                />
+              </Button>
+              {formData.image_url && (
+                <Avatar src={formData.image_url} sx={{ width: 56, height: 56 }} variant="rounded" />
+              )}
+            </Box>
+            <TextField
+              label="URL de Link (opcional)"
+              name="link_url"
+              value={formData.link_url}
+              onChange={handleFormChange}
+              fullWidth
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <LinkIcon />
+                  </InputAdornment>
+                )
+              }}
+            />
+            <FormControl fullWidth>
+              <InputLabel id="target-section-label">Sección Destino</InputLabel>
+              <Select
+                labelId="target-section-label"
+                name="target_section"
+                value={formData.target_section}
+                label="Sección Destino"
+                onChange={e => handleFormChange(e as any)}
+              >
+                <MenuItem value="home">Home</MenuItem>
+                <MenuItem value="explore">Explorar</MenuItem>
+                <MenuItem value="offers">Ofertas</MenuItem>
+              </Select>
+            </FormControl>
+            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={es}>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <DatePicker
+                    label="Fecha de Inicio"
+                    value={formData.start_date ? new Date(formData.start_date) : null}
+                    onChange={handleStartDateChange}
+                    renderInput={(params) => <TextField {...params} fullWidth />}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <DatePicker
+                    label="Fecha de Fin"
+                    value={formData.end_date ? new Date(formData.end_date) : null}
+                    onChange={handleEndDateChange}
+                    renderInput={(params) => <TextField {...params} fullWidth />}
+                  />
+                </Grid>
+              </Grid>
+            </LocalizationProvider>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={!!formData.is_active}
+                  onChange={handleActiveChange}
+                  name="is_active"
+                  color="primary"
+                />
+              }
+              label="Activo"
+            />
+            <TextField
+              label="Prioridad"
+              name="priority"
+              type="number"
+              value={formData.priority}
+              onChange={handleFormChange}
+              fullWidth
+              inputProps={{ min: 1 }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog} color="secondary">
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} variant="contained" color="primary">
+            {currentBanner ? 'Guardar Cambios' : 'Crear Banner'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para eliminar banner */}
+      <Dialog open={openDeleteDialog} onClose={handleCloseDeleteDialog}>
+        <DialogTitle>Eliminar Banner</DialogTitle>
+        <DialogContent>
+          <Typography>¿Estás seguro de que deseas eliminar este banner?</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteDialog} color="secondary">
+            Cancelar
+          </Button>
+          <Button onClick={handleDeleteBanner} color="error" variant="contained">
+            Eliminar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo para ver banner */}
+      <Dialog open={openViewDialog} onClose={handleCloseViewDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Vista Previa del Banner</DialogTitle>
+        <DialogContent>
+          {currentBanner && (
+            <Box sx={{ textAlign: 'center', p: 2 }}>
+              <Avatar src={currentBanner.image_url} sx={{ width: 120, height: 120, mx: 'auto', mb: 2 }} variant="rounded" />
+              <Typography variant="h6">{currentBanner.title}</Typography>
+              <Typography>{currentBanner.description}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Sección: {currentBanner.target_section}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Vigencia: {formatDate(currentBanner.start_date)} - {formatDate(currentBanner.end_date)}
+              </Typography>
+              <Chip
+                label={getBannerStatus(currentBanner).label}
+                color={getBannerStatus(currentBanner).color}
+                sx={{ mt: 2 }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseViewDialog} color="primary">
+            Cerrar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar de feedback */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+      {/* --- FIN FORMULARIOS Y DIALOGOS --- */}
     </Box>
   );
 }

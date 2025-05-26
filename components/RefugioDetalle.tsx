@@ -35,14 +35,25 @@ type RefugioDetalleProps = {
   onClose: () => void;
 };
 
+// Utilidad para mapear los datos desde Supabase al formato esperado por la tarjeta
+function mapRefugioSupabaseToCard(refugio: any) {
+  return {
+    ...refugio,
+    pets: Array.isArray(refugio.mascotas) ? refugio.mascotas : [],
+    urgentCauses: Array.isArray(refugio.causas_urgentes) ? refugio.causas_urgentes : [],
+    location: refugio.address || refugio.location || '',
+    bankAccount: refugio.bank_account || refugio.bankAccount || '',
+  };
+}
+
 export default function RefugioDetalle({ refugio, onClose }: RefugioDetalleProps) {
+  const mappedRefugio = mapRefugioSupabaseToCard(refugio);
   const handleDonate = () => {
-    // Aquí se implementará la lógica de donación
-    Linking.openURL(`https://petoclub.com.ar/donate/${refugio.id}`);
+    Linking.openURL(`https://petoclub.com.ar/donate/${mappedRefugio.id}`);
   };
 
   const handleContact = () => {
-    Linking.openURL(`tel:${refugio.phone}`);
+    Linking.openURL(`tel:${mappedRefugio.phone}`);
   };
 
   return (
@@ -52,26 +63,37 @@ export default function RefugioDetalle({ refugio, onClose }: RefugioDetalleProps
       </TouchableOpacity>
 
       <ScrollView style={styles.scrollView}>
-        <Image source={{ uri: refugio.image }} style={styles.refugioImage} />
+        <Image source={{ uri: mappedRefugio.image }} style={styles.refugioImage} />
         
         <View style={styles.infoContainer}>
-          <Text style={styles.refugioName}>{refugio.name}</Text>
-          <Text style={styles.refugioDescription}>{refugio.description}</Text>
+          <Text style={styles.refugioName}>{mappedRefugio.name}</Text>
+          <Text style={styles.refugioDescription}>{mappedRefugio.description}</Text>
           
           <View style={styles.contactInfo}>
             <Ionicons name="location" size={20} color="#666" />
-            <Text style={styles.contactText}>{refugio.location}</Text>
+            <Text style={styles.contactText}>{mappedRefugio.location}</Text>
           </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Mascotas para Adoptar</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.petsScroll}>
-            {refugio.pets.map((pet) => (
+            {mappedRefugio.pets.map((pet: any) => (
               <View key={pet.id} style={styles.petCard}>
                 <Image source={{ uri: pet.image }} style={styles.petImage} />
                 <Text style={styles.petName}>{pet.name}</Text>
+                <Text style={styles.petDescription}>{pet.description}</Text>
                 <Text style={styles.petInfo}>{`${pet.age} · ${pet.size}`}</Text>
+                <TouchableOpacity
+                  style={styles.adoptButton}
+                  onPress={() => {
+                    const phone = mappedRefugio.phone?.replace(/[^\d]/g, '');
+                    const url = `https://wa.me/${phone}?text=Hola!%20Quiero%20adoptar%20a%20${encodeURIComponent(pet.name)}%20del%20refugio%20${encodeURIComponent(mappedRefugio.name)}%20%F0%9F%90%BE`;
+                    Linking.openURL(url);
+                  }}
+                >
+                  <Text style={styles.adoptButtonText}>¡Adoptame!</Text>
+                </TouchableOpacity>
               </View>
             ))}
           </ScrollView>
@@ -79,7 +101,7 @@ export default function RefugioDetalle({ refugio, onClose }: RefugioDetalleProps
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Causas Urgentes</Text>
-          {refugio.urgentCauses.map((cause) => (
+          {mappedRefugio.urgentCauses.map((cause: any) => (
             <View key={cause.id} style={styles.causeCard}>
               <Text style={styles.causeTitle}>{cause.title}</Text>
               <Text style={styles.causeDescription}>{cause.description}</Text>
@@ -97,7 +119,7 @@ export default function RefugioDetalle({ refugio, onClose }: RefugioDetalleProps
 
         <View style={styles.donationSection}>
           <Text style={styles.donationTitle}>Datos para Donaciones</Text>
-          <Text style={styles.bankInfo}>{refugio.bankAccount}</Text>
+          <Text style={styles.bankInfo}>{mappedRefugio.bankAccount}</Text>
           
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.donateButton} onPress={handleDonate}>
@@ -185,6 +207,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  petDescription: {
+    fontSize: 14,
+    color: '#444',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
   petInfo: {
     fontSize: 14,
     color: '#666',
@@ -259,5 +287,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  adoptButton: {
+    marginTop: 8,
+    backgroundColor: '#25D366',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  adoptButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 15,
   },
 });

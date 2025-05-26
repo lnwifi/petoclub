@@ -48,22 +48,31 @@ type Pet = {
   species: string;
   breed: string;
   owner_id: string;
+  owner_email: string;
   created_at?: string;
   updated_at?: string;
 };
 
 // Tipo para los propietarios
 type Owner = {
-  id: string;
+  user_id: string;
   email: string;
-  full_name?: string;
 };
 
 // Estado inicial del formulario
-type FormData = Omit<Pet, 'id' | 'created_at' | 'updated_at'>;
+// FormData solo debe tener owner_id, no owner_email
+type FormData = {
+  name: string;
+  image_url: string;
+  description: string;
+  age: string;
+  species: string;
+  breed: string;
+  owner_id: string;
+};
 
 export default function Mascotas() {
-  const { supabase } = useAuth();
+  const { supabase, isAdmin, user } = useAuth();
   const [pets, setPets] = useState<Pet[]>([]);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,79 +96,56 @@ export default function Mascotas() {
     severity: 'success'
   });
 
-  // Cargar mascotas y propietarios al montar el componente
   useEffect(() => {
     const loadAllData = async () => {
+      setLoading(true);
       try {
-        // Cargar propietarios
+        // Para admins: cargar todos los perfiles
         const { data: users, error: usersError } = await supabase
           .from('profiles')
-          .select('id, email, full_name')
-          .order('full_name');
-
-        if (usersError) {
-          console.error('Error al cargar propietarios:', usersError);
-          throw usersError;
-        }
-
-        if (!users || users.length === 0) {
-          console.error('No se encontraron propietarios');
-          throw new Error('No se encontraron propietarios');
-        }
-
-        setOwners(users);
+          .select('user_id, email')
+          .order('email');
+        
+        if (usersError) throw usersError;
+        const owners = isAdmin 
+          ? users || [] 
+          : user ? [{ user_id: user.id, email: user.email }] : [];
+        setOwners(owners);
 
         // Cargar mascotas
         const { data: petsData, error: petsError } = await supabase
           .from('pets')
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('name');
+        
+        if (petsError) throw petsError;
+        
+        // Para admins, mostrar todas las mascotas
+        const filteredPets = isAdmin 
+          ? petsData || [] 
+          : petsData?.filter(pet => pet.owner_id === user?.id) || [];
 
-        if (petsError) {
-          console.error('Error al cargar mascotas:', petsError);
-          throw petsError;
-        }
-
-        if (!petsData) {
-          console.error('No se recibieron datos de mascotas');
-          throw new Error('No se recibieron datos de mascotas');
-        }
-
-        // Verificar que todos los owner_id de las mascotas existen en la lista de propietarios
-        const invalidPets = petsData.filter(pet => 
-          !users.find(user => user.id === pet.owner_id)
-        );
-
-        if (invalidPets.length > 0) {
-          console.log('Mascotas con propietarios inválidos:', invalidPets);
-          // Actualizar las mascotas con propietarios inválidos usando el primer propietario
-          const firstOwner = users[0];
-          if (firstOwner) {
-            const updatedPets = petsData.map(pet => {
-              if (!users.find(user => user.id === pet.owner_id)) {
-                return { ...pet, owner_id: firstOwner.id };
-              }
-              return pet;
-            });
-            setPets(updatedPets);
-          }
-        } else {
-          setPets(petsData);
-        }
+        // Mapping robusto
+        const ownersMap = new Map(owners.map(o => [o.user_id, o.email]));
+        const petsWithOwnerEmail = filteredPets.map(pet => ({
+          ...pet,
+          owner_email: ownersMap.get(pet.owner_id) || 'Desconocido'
+        }));
+        
+        setPets(petsWithOwnerEmail);
       } catch (error) {
         console.error('Error al cargar datos:', error);
         setSnackbar({
           open: true,
-          message: 'Error al cargar los datos. Por favor, inténtalo de nuevo.',
+          message: 'Error al cargar datos. Por favor, inténtalo de nuevo.',
           severity: 'error'
         });
       } finally {
         setLoading(false);
       }
     };
-
     loadAllData();
-  }, [supabase]);
+  }, [supabase, isAdmin, user]);
 
   // Manejar apertura del diálogo de creación/edición
   const handleOpenDialog = async (pet?: Pet) => {
@@ -178,57 +164,40 @@ export default function Mascotas() {
       if (owners.length === 0) {
         const { data: users, error } = await supabase
           .from('profiles')
-          .select('id, email, full_name')
-          .order('full_name');
+          .select('user_id, email')
+          .order('email');
 
         if (error) {
           console.error('Error al cargar propietarios:', error);
           throw error;
         }
 
-        if (!users || users.length === 0) {
-          console.error('No se encontraron propietarios');
-          throw new Error('No se encontraron propietarios');
-        }
-
-        setOwners(users);
+        const filteredOwners = isAdmin 
+          ? users || [] 
+          : user ? [{ user_id: user.id, email: user.email }] : [];
+        
+        setOwners(filteredOwners);
       }
 
       if (pet) {
-        // Verificar que el owner_id existe en la lista de propietarios
-        const owner = owners.find(o => o.id === pet.owner_id);
+        const owner = owners.find(o => o.user_id === pet.owner_id);
+        console.log('Editando mascota:', pet.name, 'owner_id:', pet.owner_id, 'encontrado:', !!owner, 'owners:', owners.map(o => o.user_id));
         if (!owner) {
-          // Si no se encuentra el propietario, usar el primer propietario disponible
-          const firstOwner = owners[0];
-          if (!firstOwner) {
-            throw new Error('No se encontraron propietarios disponibles');
-          }
-          console.log('Propietario original no encontrado, usando:', firstOwner.id);
-          setCurrentPet({ ...pet, owner_id: firstOwner.id });
-          setFormData({
-            name: pet.name,
-            image_url: pet.image_url,
-            description: pet.description,
-            age: pet.age,
-            species: pet.species,
-            breed: pet.breed,
-            owner_id: firstOwner.id
-          });
-        } else {
-          setCurrentPet(pet);
-          setFormData({
-            name: pet.name,
-            image_url: pet.image_url,
-            description: pet.description,
-            age: pet.age,
-            species: pet.species,
-            breed: pet.breed,
-            owner_id: pet.owner_id
-          });
+          console.warn('Propietario no encontrado para la mascota:', pet);
         }
+
+        setCurrentPet(pet);
+        setFormData({
+          name: pet.name,
+          image_url: pet.image_url,
+          description: pet.description,
+          age: pet.age,
+          species: pet.species,
+          breed: pet.breed,
+          owner_id: owner ? owner.user_id : ''
+        });
       } else {
         setCurrentPet(null);
-        // Usar el ID del usuario actual
         setFormData({
           name: '',
           image_url: '',
@@ -236,7 +205,7 @@ export default function Mascotas() {
           age: '',
           species: '',
           breed: '',
-          owner_id: session.user.id
+          owner_id: '' // Dejar vacío por defecto, se llenará cuando elijan un propietario
         });
       }
       setOpenDialog(true);
@@ -257,7 +226,7 @@ export default function Mascotas() {
     
     // Si es el select de owner_id, validar que existe en la lista
     if (name === 'owner_id') {
-      const owner = owners.find(o => o.id === value);
+      const owner = owners.find(o => o.user_id === value);
       if (owner) {
         setFormData(prev => ({ ...prev, owner_id: value }));
       } else {
@@ -295,7 +264,7 @@ export default function Mascotas() {
       }
 
       // Verificar que el owner_id es válido
-      const owner = owners.find(o => o.id === formData.owner_id);
+      const owner = owners.find(o => o.user_id === formData.owner_id);
       if (!owner) {
         throw new Error('El propietario seleccionado no es válido');
       }
@@ -467,10 +436,10 @@ export default function Mascotas() {
     setSnackbar(prev => ({ ...prev, open: false }));
   };
 
-  // Obtener nombre del propietario por ID
+  // Obtener nombre del propietario por user_id
   const getOwnerName = (ownerId: string) => {
-    const owner = owners.find(o => o.id === ownerId);
-    return owner ? owner.full_name || owner.email : 'Desconocido';
+    const owner = owners.find(o => o.user_id === ownerId);
+    return owner ? owner.email : 'Desconocido';
   };
 
   if (loading) {
@@ -528,7 +497,18 @@ export default function Mascotas() {
                   />
                 </TableCell>
                 <TableCell>{pet.age}</TableCell>
-                <TableCell>{getOwnerName(pet.owner_id)}</TableCell>
+                <TableCell>
+                  {(() => {
+                    const owner = owners.find(o => o.user_id === pet.owner_id);
+                    return owner ? owner.email : (
+                      <Chip 
+                        label="Propietario no encontrado"
+                        color="warning"
+                        variant="outlined"
+                      />
+                    );
+                  })()}
+                </TableCell>
                 <TableCell align="center">
                   <Tooltip title="Ver detalles">
                     <IconButton onClick={() => handleOpenViewDialog(pet)}>
@@ -615,18 +595,19 @@ export default function Mascotas() {
               />
             </Grid>
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel id="owner-label">Propietario *</InputLabel>
+              <FormControl fullWidth margin="normal">
+                <InputLabel id="owner-label">Propietario</InputLabel>
                 <Select
                   labelId="owner-label"
+                  id="owner_id"
                   name="owner_id"
                   value={formData.owner_id}
-                  label="Propietario *"
-                  onChange={handleFormChange}
+                  label="Propietario"
+                  onChange={e => setFormData(prev => ({ ...prev, owner_id: e.target.value }))}
                 >
-                  {owners.map(owner => (
-                    <MenuItem key={owner.id} value={owner.id}>
-                      {owner.full_name || owner.email}
+                  {owners.map((owner) => (
+                    <MenuItem key={owner.user_id} value={owner.user_id}>
+                      {owner.email}
                     </MenuItem>
                   ))}
                 </Select>

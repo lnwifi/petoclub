@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, Platform, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, Platform, SafeAreaView, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCart } from '../../lib/cart-context';
@@ -18,7 +18,8 @@ interface CheckoutForm {
   city: string;
   postalCode: string;
   province: string;
-  paymentMethod: 'creditCard' | 'transfer' | 'mercadoPago' | '';
+  paymentMethod: 'mercadoPago' | '';
+  notes: string;
 }
 
 // Definir tipos para errores del formulario
@@ -26,13 +27,135 @@ type FormErrors = {
   [key in keyof CheckoutForm]?: string;
 };
 
+// Definir tipo para items del carrito
+interface CartItem {
+  id: number;
+  name: string;
+  price: string;
+  qty: number;
+  image?: string;
+}
+
+// Definir tipo para la respuesta de MercadoPago
+interface MercadoPagoResponse {
+  id: string;  // ID de la preferencia
+  status?: string;
+  init_point: string;  // URL de pago en producción
+  sandbox_init_point: string;  // URL de pago en sandbox
+  external_reference: string;
+  payer: {
+    email: string;
+    name: string;
+    surname: string;
+    phone: {
+      area_code: string;
+      number: string;
+    };
+    address: {
+      zip_code: string;
+      street_name: string;
+      street_number: number | null;
+    };
+    identification: {
+      number: string;
+      type: string;
+    };
+    date_created: string | null;
+    last_purchase: string | null;
+  };
+  items: Array<{
+    id: string;
+    title: string;
+    quantity: number;
+    unit_price: number;
+    currency_id: string;
+  }>;
+  metadata: {
+    order_id: number;
+    tipo: string;
+  };
+  additional_info?: string;
+  auto_return?: string;
+  back_urls?: {
+    failure: string;
+    pending: string;
+    success: string;
+  };
+  binary_mode?: boolean;
+  client_id?: string;
+  collector_id?: number;
+  coupon_code?: string;
+  coupon_labels?: string[];
+  date_created?: string;
+  date_of_expiration?: string;
+  expiration_date_from?: string;
+  expiration_date_to?: string;
+  expires?: boolean;
+  internal_metadata?: any;
+  marketplace?: string;
+  marketplace_fee?: number;
+  notification_url?: string;
+  operation_type?: string;
+  processing_modes?: any;
+  product_id?: string;
+  redirect_urls?: {
+    failure: string;
+    pending: string;
+    success: string;
+  };
+  site_id?: string;
+  shipments?: {
+    default_shipping_method?: string;
+    receiver_address?: {
+      zip_code?: string;
+      street_name?: string;
+      street_number?: number | null;
+      floor?: string;
+      apartment?: string;
+      city_name?: string;
+      state_name?: string;
+      country_name?: string;
+    };
+  };
+  total_amount?: number;
+  last_updated?: string;
+  financing_group?: string;
+  payment_methods?: {
+    default_card_id?: string | null;
+    default_payment_method_id?: string | null;
+    excluded_payment_methods?: Array<{ id: string }>;
+    excluded_payment_types?: Array<{ id: string }>;
+    installments?: number | null;
+    default_installments?: number | null;
+  };
+}
+
 export default function Checkout() {
-  const { items, getCartTotal, clearCart } = useCart();
+  // Solución: leer el carrito real directamente de localStorage
+  function getCart(): CartItem[] {
+    try {
+      const cart = localStorage.getItem('petoclub_cart');
+      return cart ? JSON.parse(cart) : [];
+    } catch (e) {
+      if (globalThis['petoclub_cart']) {
+        return JSON.parse(globalThis['petoclub_cart']);
+      }
+      return [];
+    }
+  }
+  const [items, setItems] = useState<CartItem[]>(getCart());
+  const getCartTotal = () => items.reduce((sum: number, p: CartItem) => sum + (parseFloat(p.price) * p.qty), 0);
+  const clearCart = () => {
+    try {
+      localStorage.setItem('petoclub_cart', '[]');
+    } catch (e) {
+      globalThis['petoclub_cart'] = '[]';
+    }
+  };
   const { hasStoreDiscount } = useMembership();
+  const [isProcessingOrder, setIsProcessingOrder] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formStep, setFormStep] = useState<'shipping' | 'payment' | 'review'>('shipping');
-  
-  // Estado del formulario
+  const [mpResponse, setMpResponse] = useState<MercadoPagoResponse | null>(null);
   const [form, setForm] = useState<CheckoutForm>({
     firstName: '',
     lastName: '',
@@ -43,10 +166,10 @@ export default function Checkout() {
     postalCode: '',
     province: '',
     paymentMethod: '',
+    notes: '',
   });
-  
-  // Estado para errores de validación
   const [errors, setErrors] = useState<FormErrors>({});
+  const [formStep, setFormStep] = useState<'shipping' | 'payment' | 'review'>('shipping');
   
   // Manejar cambios en los campos del formulario
   const handleChange = (field: keyof CheckoutForm, value: string) => {
@@ -146,36 +269,50 @@ export default function Checkout() {
   };
   
   // Estado para controlar múltiples envíos
-  const [isProcessingOrder, setIsProcessingOrder] = useState(false);
-
-  // Generar un token único para la sesión de checkout
   const [sessionToken] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
   // Procesar el pago
   const handleSubmitOrder = async () => {
+    console.log('handleSubmitOrder llamado');
+    Alert.alert('Debug', 'handleSubmitOrder fue llamado');
+  // Obtener el token de sesión del usuario (si aplica)
+  let sessionToken = '';
+  try {
+    const session = await AsyncStorage.getItem('user_session');
+    if (session) {
+      const parsed = JSON.parse(session);
+      sessionToken = parsed.access_token || '';
+    }
+  } catch {}
+
     if (isProcessingOrder) {
+      console.log('STOP: isProcessingOrder true');
       Alert.alert('Procesando', 'Tu pedido está siendo procesado, por favor espera...');
-      return;
+      return Alert.alert('Debug', 'STOP: isProcessingOrder true');
     }
 
     if (items.length === 0) {
+      console.log('STOP: carrito vacío');
       Alert.alert('Error', 'Tu carrito está vacío');
-      return;
+      return Alert.alert('Debug', 'STOP: carrito vacío');
     }
-    
+
     // Prevenir múltiples envíos si ya está en proceso
     if (isSubmitting) {
+      console.log('STOP: isSubmitting true');
       Alert.alert('Procesando', 'Tu pedido está siendo procesado. Por favor, espera.');
-      return;
+      return Alert.alert('Debug', 'STOP: isSubmitting true');
     }
 
     setIsProcessingOrder(true);
     setIsSubmitting(true);
+    console.log('PASO: después de setIsProcessingOrder/setIsSubmitting');
+    Alert.alert('Debug', 'PASO: después de setIsProcessingOrder/setIsSubmitting');
 
     // Generar un ID único para la orden que incluye el token de sesión
     const orderKey = `order_${sessionToken}_${Date.now()}`;
-    
-    try {
+
+      try {
       // Verificar si hay una orden en proceso
       const processingOrder = await AsyncStorage.getItem('processing_order');
       if (processingOrder) {
@@ -193,17 +330,15 @@ export default function Checkout() {
         timestamp: Date.now(),
         email: form.email,
         sessionToken: sessionToken,
-        items: items.map(item => `${item.product.id}-${item.quantity}`).join(',')
+        items: items.map(item => `${item.id}-${item.qty}`).join(',')
       }));
       
       setIsSubmitting(true);
       
       // Preparar los datos para la orden de WooCommerce
       const orderData: OrderData = {
-        payment_method: form.paymentMethod === 'creditCard' ? 'bacs' : 
-                        form.paymentMethod === 'transfer' ? 'bacs' : 'mercadopago',
-        payment_method_title: form.paymentMethod === 'creditCard' ? 'Tarjeta de crédito/débito' : 
-                              form.paymentMethod === 'transfer' ? 'Transferencia bancaria' : 'MercadoPago',
+        payment_method: 'mercadopago',
+        payment_method_title: 'MercadoPago',
         billing: {
           first_name: form.firstName,
           last_name: form.lastName,
@@ -227,8 +362,8 @@ export default function Checkout() {
           country: 'AR' // Argentina
         },
         line_items: items.map(item => ({
-          product_id: item.product.id,
-          quantity: item.quantity
+          product_id: item.id,
+          quantity: item.qty
         })),
         shipping_lines: [
           {
@@ -237,21 +372,7 @@ export default function Checkout() {
             total: '0.00' // Envío gratuito
           }
         ],
-        // Añadir metadatos para prevenir duplicados
-        meta_data: [
-          {
-            key: 'session_token',
-            value: sessionToken
-          },
-          {
-            key: 'order_timestamp',
-            value: Date.now().toString()
-          },
-          {
-            key: 'device_info',
-            value: Platform.OS + '_' + Platform.Version
-          }
-        ]
+
       };
       
       // Verificar si ya existe una orden reciente con los mismos datos para evitar duplicados
@@ -268,7 +389,7 @@ export default function Checkout() {
               // Verificar si es una orden reciente (menos de 2 minutos) con los mismos datos
               const isRecent = Date.now() - order.timestamp < 120000; // 2 minutos
               const sameEmail = order.email === form.email;
-              const sameItems = order.items === items.map(item => `${item.product.id}-${item.quantity}`).join(',');
+              const sameItems = order.items === items.map(item => `${item.id}-${item.qty}`).join(',');
               
               if (isRecent && sameEmail && sameItems) {
                 console.warn('Se detectó un intento de crear un pedido duplicado');
@@ -278,7 +399,8 @@ export default function Checkout() {
           }
           return false; // No se encontraron duplicados
         } catch (error) {
-          if (error.message.includes('Ya se ha creado un pedido idéntico')) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes('Ya se ha creado un pedido idéntico')) {
             throw error; // Re-lanzar el error específico
           }
           console.error('Error al verificar pedidos recientes:', error);
@@ -299,7 +421,7 @@ export default function Checkout() {
       await AsyncStorage.setItem(recentOrderKey, JSON.stringify({
         id: response.id,
         email: form.email,
-        items: items.map(item => `${item.product.id}-${item.quantity}`).join(','),
+        items: items.map(item => `${item.id}-${item.qty}`).join(','),
         timestamp: Date.now(),
         sessionToken: sessionToken
       }));
@@ -308,103 +430,120 @@ export default function Checkout() {
       await AsyncStorage.removeItem('processing_order');
       
       // Si el método de pago es MercadoPago, procesar el pago directamente en la app
-      if (form.paymentMethod === 'mercadoPago') {
-        try {
-          // Usar la nueva función para crear una orden con MercadoPago
-          const mpResponse = await createMercadoPagoOrder(orderData);
-          
-          // Verificar si hay un error específico en la configuración
-          if ('success' in mpResponse && mpResponse.success === false && 'error' in mpResponse) {
-            console.warn('Error en la configuración de MercadoPago:', mpResponse.error);
-            throw new Error('Error en la configuración de MercadoPago');
-          }
-          
-          if (!('preferenceId' in mpResponse) || typeof mpResponse.preferenceId !== 'string') {
-            throw new Error('No se pudieron obtener los datos para el pago');
-          }
-          
-          // Guardar información del pedido
-          const orderInfo = {
-            id: ('orderId' in mpResponse) ? mpResponse.orderId : undefined,
-            preferenceId: mpResponse.preferenceId,
-            status: ('status' in mpResponse) ? mpResponse.status : undefined,
-            date: new Date().toISOString(),
-          };
-          
-          if (orderInfo.id) {
-            await AsyncStorage.setItem(`order_${orderInfo.id}`, JSON.stringify(orderInfo));
-          }
-          
-          // Limpiar carrito
-          clearCart();
-          
-          // Mostrar opciones al usuario
-          Alert.alert(
-            'Pedido creado',
-            'Tu pedido ha sido creado. Ahora puedes completar el pago con MercadoPago.',
-            [
-              { 
-                text: 'Pagar ahora', 
-                onPress: () => {
-                  const checkoutUrl = ('initPoint' in mpResponse ? mpResponse.initPoint : null) || 
-                                    ('sandboxInitPoint' in mpResponse ? mpResponse.sandboxInitPoint : null);
-                  
-                  if (checkoutUrl) {
-                    setTimeout(() => {
-                      router.push({
-                        pathname: '/webview',
-                        params: { url: encodeURIComponent(checkoutUrl) } as any
-                      } as any);
-                    }, 500);
-                  } else {
-                    throw new Error('No se pudo obtener la URL de pago');
-                  }
-                }
-              },
-              {
-                text: 'Ver mis pedidos',
-                onPress: () => router.push('/profile/orders'),
-                style: 'cancel'
-              }
-            ]
-          );
-        } catch (mpError) {
-          console.error('Error al procesar con MercadoPago:', mpError);
-          throw mpError;
+      try {
+        // Solo proceder si la orden de WooCommerce tiene ID
+        if (!response || !response.id) {
+          Alert.alert('Error', 'No se pudo crear la orden en WooCommerce. Intenta nuevamente.');
+          return;
         }
-      } else {
-        // Para otros métodos de pago
-        Alert.alert(
-          'Pedido creado',
-          form.paymentMethod === 'transfer' 
-            ? 'Tu pedido ha sido creado. Por favor, realiza la transferencia bancaria según las instrucciones enviadas a tu correo.'
-            : 'Tu pedido ha sido creado exitosamente.',
-          [
-            { 
-              text: 'Ver mis pedidos', 
-              onPress: () => router.push('/profile/orders')
-            }
-          ]
-        );
+        // Preparar payload para MercadoPago
+        const mpPayload = {
+          tipo: 'pedido_tienda',
+          order_id: response.id.toString(),
+          external_reference: response.id.toString(),
+          title: `Compra en PetoClub - ${items.map(item => item.name + ' x' + item.qty).join(', ')}`,
+          price: items.reduce((sum, item) => sum + (parseFloat(item.price) * item.qty), 0),
+          items: items.map(item => ({
+            id: item.id.toString(),
+            title: item.name,
+            quantity: item.qty,
+            unit_price: parseFloat(item.price),
+            currency_id: 'ARS',
+          })),
+          payer: {
+            email: form.email,
+            name: form.firstName,
+            surname: form.lastName,
+          },
+          back_urls: {
+            success: 'https://petoclub.com/success',
+            failure: 'https://petoclub.com/failure',
+            pending: 'https://petoclub.com/pending',
+          },
+        };
+        // IMPORTANTE: pasar el objeto response (respuesta de WooCommerce) que SÍ tiene id
+const mpResponse = await createMercadoPagoOrder(response);
         
+        // Manejar errores con type checking
+        const handleMercadoPagoError = (error: unknown) => {
+          if (error instanceof Error) {
+            Alert.alert('Error', error.message);
+          } else {
+            Alert.alert('Error', 'Ocurrió un error inesperado');
+          }
+        };
+        
+        if ('success' in mpResponse && mpResponse.success === false && 'error' in mpResponse) {
+          console.warn('Error en la configuración de MercadoPago:', mpResponse.error);
+          throw new Error('Error en la configuración de MercadoPago');
+        }
+        
+        // Validar la respuesta de MercadoPago
+        // Construir orderInfo de forma segura
+        const orderInfo: { id?: number | string; preferenceId?: string; status?: string; date: string } = {
+          id: (typeof mpResponse === 'object' && mpResponse !== null && 'metadata' in mpResponse && (mpResponse as any).metadata?.order_id) ? (mpResponse as any).metadata.order_id : undefined,
+          preferenceId: (typeof mpResponse === 'object' && mpResponse !== null && 'id' in mpResponse) ? (mpResponse as any).id : undefined,
+          status: (typeof mpResponse === 'object' && mpResponse !== null && 'status' in mpResponse) ? (mpResponse as any).status : undefined,
+          date: new Date().toISOString(),
+        };
+
+        
+        if (orderInfo.id) {
+          await AsyncStorage.setItem(`order_${orderInfo.id}`, JSON.stringify(orderInfo));
+        }
+        
+        // Limpiar carrito
         clearCart();
+        
+        // Redirigir automáticamente al checkout de MercadoPago si hay preferencia válida
+        const paymentUrl =
+          (mpResponse && typeof mpResponse === 'object' && 'init_point' in mpResponse ? (mpResponse as any).init_point : null) ||
+          (mpResponse && typeof mpResponse === 'object' && 'sandbox_init_point' in mpResponse ? (mpResponse as any).sandbox_init_point : null) ||
+          (mpResponse && typeof mpResponse === 'object' && 'initPoint' in mpResponse ? (mpResponse as any).initPoint : null) ||
+          (mpResponse && typeof mpResponse === 'object' && 'sandboxInitPoint' in mpResponse ? (mpResponse as any).sandboxInitPoint : null) ||
+          null;
+        if (paymentUrl && (paymentUrl.startsWith('https://www.mercadopago') || paymentUrl.startsWith('https://sandbox.mercadopago'))) {
+          setTimeout(() => {
+            // Abrir la URL en el navegador externo
+            Linking.openURL(paymentUrl);
+          }, 500);
+        } else {
+          const backendMsg = typeof mpResponse === 'object' && mpResponse !== null && 'error' in mpResponse ? (mpResponse as any).error : '';
+          Alert.alert('Error', backendMsg || 'No se pudo obtener la URL de pago de MercadoPago. Intenta nuevamente.');
+        }
+      } catch (mpError) {
+        console.error('Error al procesar con MercadoPago:', mpError);
+        if (mpError instanceof Error) {
+          handleMercadoPagoError(mpError);
+        } else if (typeof mpError === 'object' && mpError !== null && 'message' in mpError) {
+          handleMercadoPagoError(new Error(String((mpError as any).message)));
+        } else {
+          handleMercadoPagoError(new Error('Ocurrió un error inesperado con MercadoPago.'));
+        }
       }
     } catch (error) {
-      console.error('Error al procesar la orden:', error);
-      
-      // Determinar si es un error de duplicado
-      const isDuplicateError = 
-        error.message?.includes('pedido duplicado') || 
-        error.message?.includes('solicitud de pedido idéntica') ||
-        error.message?.includes('solicitud de pedido similar');
-      
+      let errorMsg = 'Ocurrió un error inesperado';
+      let isDuplicateError = false;
+      if (error instanceof Error) {
+        errorMsg = error.message;
+        isDuplicateError = error.message?.includes('pedido duplicado') || 
+          error.message?.includes('solicitud de pedido idéntica') ||
+          error.message?.includes('solicitud de pedido similar');
+      } else if (typeof error === 'object' && error !== null && 'message' in error) {
+        errorMsg = String((error as any).message);
+        isDuplicateError = (error as any).message?.includes('pedido duplicado') ||
+          (error as any).message?.includes('solicitud de pedido idéntica') ||
+          (error as any).message?.includes('solicitud de pedido similar');
+      } else {
+        errorMsg = String(error);
+      }
+      Alert.alert('Error', errorMsg);
       // Limpiar el estado de procesamiento en caso de error
       try {
         await AsyncStorage.removeItem('processing_order');
       } catch (cleanupError) {
         console.error('Error al limpiar estado de procesamiento:', cleanupError);
       }
-      
       if (isDuplicateError) {
         // Mensaje específico para pedidos duplicados
         Alert.alert(
@@ -457,6 +596,15 @@ export default function Checkout() {
     }
   };
   
+  // Manejar errores con type checking
+  const handleMercadoPagoError = (error: unknown) => {
+    if (error instanceof Error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Error', 'Ocurrió un error inesperado');
+    }
+  };
+  
   // Renderizar campos de formulario con manejo de errores
   const renderField = (
     label: string,
@@ -477,72 +625,34 @@ export default function Checkout() {
     </View>
   );
   
-  // Renderizar el resumen del carrito
-  const renderCartSummary = () => (
-    <View style={styles.cartSummary}>
-      <Text style={styles.summaryTitle}>Resumen de compra</Text>
-      
-      {items.map((item) => (
-        <View key={item.product.id} style={styles.summaryItem}>
-          <View style={styles.summaryItemInfo}>
-            <Text style={styles.summaryItemName} numberOfLines={1}>
-              {item.product.name}
-            </Text>
-            <Text style={styles.summaryItemQuantity}>x{item.quantity}</Text>
-          </View>
-          <Text style={styles.summaryItemPrice}>
-            ${(parseFloat(item.product.price) * item.quantity).toFixed(2)}
-          </Text>
-        </View>
-      ))}
-      
-      <View style={styles.divider} />
-      
-      {hasStoreDiscount() && (
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Descuento Premium</Text>
-          <Text style={styles.discountText}>-10%</Text>
-        </View>
-      )}
-      
-      <View style={styles.summaryRow}>
-        <Text style={styles.summaryTotal}>Total</Text>
-        <Text style={styles.summaryTotalAmount}>${getCartTotal().toFixed(2)}</Text>
-      </View>
-    </View>
-  );
-  
-  // Renderizar el paso de envío
+  // Asegurar que JSX tenga un solo elemento padre
   const renderShippingStep = () => (
     <View style={styles.formContainer}>
       <Text style={styles.stepTitle}>Información de envío</Text>
-      
-      <View style={styles.formRow}>
-        {renderField('Nombre', 'firstName', 'Ingresa tu nombre')}
-        {renderField('Apellido', 'lastName', 'Ingresa tu apellido')}
-      </View>
-      
-      <View style={styles.formRow}>
-        {renderField('Email', 'email', 'ejemplo@email.com', 'email-address')}
-        {renderField('Teléfono', 'phone', 'Ingresa tu teléfono', 'phone-pad')}
-      </View>
-      
-      {renderField('Dirección', 'address', 'Calle y número')}
-      
+      {renderField('Nombre', 'firstName', 'Ingresa tu nombre')}
+      {renderField('Apellido', 'lastName', 'Ingresa tu apellido')}
+      {renderField('Email', 'email', 'Ingresa tu email', 'email-address')}
+      {renderField('Teléfono', 'phone', 'Ingresa tu teléfono', 'phone-pad')}
+      {renderField('Dirección', 'address', 'Ingresa tu dirección')}
       <View style={styles.formRow}>
         {renderField('Ciudad', 'city', 'Ingresa tu ciudad')}
         {renderField('Código Postal', 'postalCode', 'Ingresa tu CP', 'numeric')}
       </View>
-      
       {renderField('Provincia', 'province', 'Ingresa tu provincia')}
-      
-      <TouchableOpacity 
-        style={styles.nextButton}
-        onPress={handleNextStep}
-      >
-        <Text style={styles.buttonText}>Continuar al pago</Text>
-        <Ionicons name="arrow-forward" size={20} color="#fff" />
-      </TouchableOpacity>
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.push('/cart')}>
+          <Ionicons name="arrow-back" size={20} color="#666" />
+          <Text style={styles.backButtonText}>Cancelar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.nextButton, isSubmitting && styles.disabledButton]}
+          onPress={handleNextStep}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.buttonText}>Continuar</Text>
+          <Ionicons name="arrow-forward" size={20} color="#fff" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
   
@@ -550,70 +660,40 @@ export default function Checkout() {
   const renderPaymentStep = () => (
     <View style={styles.formContainer}>
       <Text style={styles.stepTitle}>Método de pago</Text>
-      
       <TouchableOpacity
         style={[
           styles.paymentOption,
-          form.paymentMethod === 'creditCard' && styles.selectedPayment
-        ]}
-        onPress={() => handleChange('paymentMethod', 'creditCard')}
-      >
-        <Ionicons 
-          name="card" 
-          size={24} 
-          color={form.paymentMethod === 'creditCard' ? '#ffbc4c' : '#666'} 
-        />
-        <Text style={styles.paymentOptionText}>Tarjeta de crédito/débito</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity
-        style={[
-          styles.paymentOption,
-          form.paymentMethod === 'transfer' && styles.selectedPayment
-        ]}
-        onPress={() => handleChange('paymentMethod', 'transfer')}
-      >
-        <Ionicons 
-          name="cash" 
-          size={24} 
-          color={form.paymentMethod === 'transfer' ? '#ffbc4c' : '#666'} 
-        />
-        <Text style={styles.paymentOptionText}>Transferencia bancaria</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity
-        style={[
-          styles.paymentOption,
-          form.paymentMethod === 'mercadoPago' && styles.selectedPayment
+          form.paymentMethod === 'mercadoPago' && styles.selectedPayment,
         ]}
         onPress={() => handleChange('paymentMethod', 'mercadoPago')}
+        activeOpacity={0.85}
       >
-        <Ionicons 
-          name="wallet" 
-          size={24} 
-          color={form.paymentMethod === 'mercadoPago' ? '#ffbc4c' : '#666'} 
-        />
+        <Ionicons name={form.paymentMethod === 'mercadoPago' ? 'radio-button-on' : 'radio-button-off'} size={22} color="#ffbc4c" />
         <Text style={styles.paymentOptionText}>MercadoPago</Text>
       </TouchableOpacity>
-      
-      {errors.paymentMethod && (
-        <Text style={styles.errorText}>{errors.paymentMethod}</Text>
-      )}
-      
+      {errors.paymentMethod && <Text style={styles.errorText}>{errors.paymentMethod}</Text>}
+      <View style={{ marginTop: 18 }}>
+        <Text style={styles.label}>Notas para el pedido (opcional)</Text>
+        <TextInput
+          style={[styles.input, { minHeight: 56 }]}
+          placeholder="Ej: Entregar solo por la tarde, aclaraciones, etc."
+          value={form.notes}
+          onChangeText={text => handleChange('notes', text)}
+          multiline
+          numberOfLines={3}
+        />
+      </View>
       <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={handlePrevStep}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={handlePrevStep}>
           <Ionicons name="arrow-back" size={20} color="#666" />
-          <Text style={styles.backButtonText}>Volver</Text>
+          <Text style={styles.backButtonText}>Atrás</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.nextButton}
+        <TouchableOpacity
+          style={[styles.nextButton, isSubmitting && styles.disabledButton]}
           onPress={handleNextStep}
+          disabled={isSubmitting}
         >
-          <Text style={styles.buttonText}>Revisar orden</Text>
+          <Text style={styles.buttonText}>Revisar pedido</Text>
           <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -624,63 +704,55 @@ export default function Checkout() {
   const renderReviewStep = () => (
     <View style={styles.formContainer}>
       <Text style={styles.stepTitle}>Revisar y confirmar</Text>
-      
       <View style={styles.reviewSection}>
         <View style={styles.reviewHeader}>
-          <Text style={styles.reviewSectionTitle}>Información de envío</Text>
-          <TouchableOpacity onPress={() => setFormStep('shipping')}>
-            <Text style={styles.editText}>Editar</Text>
-          </TouchableOpacity>
+          <Text style={styles.reviewSectionTitle}>Datos de envío</Text>
+          <TouchableOpacity onPress={() => setFormStep('shipping')}><Text style={styles.editText}>Editar</Text></TouchableOpacity>
         </View>
-        
-        <Text style={styles.reviewText}>
-          {form.firstName} {form.lastName}
-        </Text>
-        <Text style={styles.reviewText}>{form.email}</Text>
-        <Text style={styles.reviewText}>{form.phone}</Text>
-        <Text style={styles.reviewText}>{form.address}</Text>
-        <Text style={styles.reviewText}>
-          {form.city}, {form.province}, CP: {form.postalCode}
-        </Text>
+        <Text style={styles.reviewText}>{form.firstName} {form.lastName}</Text>
+        <Text style={styles.reviewText}>{form.email} | {form.phone}</Text>
+        <Text style={styles.reviewText}>{form.address}, {form.city}, {form.province}, {form.postalCode}</Text>
       </View>
-      
       <View style={styles.reviewSection}>
         <View style={styles.reviewHeader}>
-          <Text style={styles.reviewSectionTitle}>Método de pago</Text>
-          <TouchableOpacity onPress={() => setFormStep('payment')}>
-            <Text style={styles.editText}>Editar</Text>
-          </TouchableOpacity>
+          <Text style={styles.reviewSectionTitle}>Resumen de compra</Text>
+          <TouchableOpacity onPress={() => setFormStep('payment')}><Text style={styles.editText}>Editar</Text></TouchableOpacity>
         </View>
-        
-        <Text style={styles.reviewText}>
-          {form.paymentMethod === 'creditCard' && 'Tarjeta de crédito/débito'}
-          {form.paymentMethod === 'transfer' && 'Transferencia bancaria'}
-          {form.paymentMethod === 'mercadoPago' && 'MercadoPago'}
-        </Text>
+        {items.map((item: CartItem, idx: number) => (
+          <Text key={idx} style={styles.reviewText}>{item.qty} x {item.name} - ${parseFloat(item.price).toFixed(2)}</Text>
+        ))}
+        <Text style={[styles.reviewText, { fontWeight: 'bold', marginTop: 6 }]}>Total: ${getCartTotal().toFixed(2)}</Text>
       </View>
-      
+
+      {/* Botón de pago MercadoPago si existe preferencia */}
+      {mpResponse && ((mpResponse.init_point && mpResponse.init_point.startsWith('https://www.mercadopago')) || (mpResponse.sandbox_init_point && mpResponse.sandbox_init_point.startsWith('https://sandbox.mercadopago')))
+        ? (
+          <TouchableOpacity
+            style={[styles.confirmButton, { backgroundColor: '#009ee3', marginTop: 18 }]}
+            onPress={() => {
+              const paymentUrl = mpResponse.init_point || mpResponse.sandbox_init_point;
+              if (paymentUrl) {
+                router.push({ pathname: '/webview', params: { url: encodeURIComponent(paymentUrl) } as any } as any);
+              }
+            }}
+          >
+            <Ionicons name="logo-usd" size={20} color="#fff" />
+            <Text style={styles.buttonText}>Pagar con MercadoPago</Text>
+          </TouchableOpacity>
+        ) : null}
+
       <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={handlePrevStep}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={handlePrevStep}>
           <Ionicons name="arrow-back" size={20} color="#666" />
-          <Text style={styles.backButtonText}>Volver</Text>
+          <Text style={styles.backButtonText}>Atrás</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.confirmButton, isSubmitting && styles.disabledButton]}
           onPress={handleSubmitOrder}
           disabled={isSubmitting}
         >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <Text style={styles.buttonText}>Confirmar compra</Text>
-              <Ionicons name="checkmark" size={20} color="#fff" />
-            </>
-          )}
+          <Text style={styles.buttonText}>Confirmar pedido</Text>
+          <Ionicons name="checkmark" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
     </View>
@@ -699,6 +771,49 @@ export default function Checkout() {
         return null;
     }
   };
+  
+  // Renderizar el resumen del carrito
+  const renderCartSummary = () => (
+    <View style={styles.cartSummary}>
+      <Text style={styles.summaryTitle}>Resumen de compra</Text>
+      
+      {Array.isArray(items) && items
+        .filter((item: CartItem) => item && (item.name && item.price))
+        .map((item: CartItem, idx: number) => {
+          // Soporta tanto estructura vieja (item.product) como plana (item.name, item.price)
+          const name: string = item.name || 'Sin nombre';
+          const price: number = parseFloat(item.price || '0');
+          const qty: number = item.qty || 1;
+          return (
+            <View key={item.id || idx} style={styles.summaryItem}>
+              <View style={styles.summaryItemInfo}>
+                <Text style={styles.summaryItemName} numberOfLines={1}>
+                  {name}
+                </Text>
+                <Text style={styles.summaryItemQuantity}>x{qty}</Text>
+              </View>
+              <Text style={styles.summaryItemPrice}>
+                {(price * qty).toFixed(2)}
+              </Text>
+            </View>
+          );
+        })}
+      
+      <View style={styles.divider} />
+      
+      {hasStoreDiscount() && (
+        <View>
+          <Text style={styles.summaryLabel}>Descuento Premium</Text>
+          <Text style={styles.discountText}>-10%</Text>
+        </View>
+      )}
+      
+      <View style={styles.summaryRow}>
+        <Text style={styles.summaryTotal}>Total</Text>
+        <Text style={styles.summaryTotalAmount}>${getCartTotal().toFixed(2)}</Text>
+      </View>
+    </View>
+  );
   
   return (
     <SafeAreaView style={styles.container}>

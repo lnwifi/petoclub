@@ -12,6 +12,9 @@ import { CartProvider } from '@/lib/cart-context';
 // Prevent the splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
+import { PetSelectionProvider } from './components/PetSelectionContext';
+import PetSelectionModal from './components/PetSelectionModal';
+
 export default function RootLayout() {
   useFrameworkReady();
 
@@ -37,7 +40,10 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <CartProvider>
-        <Slot />
+        <PetSelectionProvider>
+          <PetSelectionModal />
+          <Slot />
+        </PetSelectionProvider>
         <StatusBar style="auto" />
       </CartProvider>
     </AuthProvider>

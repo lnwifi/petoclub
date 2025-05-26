@@ -15,7 +15,9 @@ import {
 import { X, Camera, Upload, Check, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
-import { uploadImage } from '@/utils/imageUpload';
+import { uploadImage, deleteImageByPublicUrl } from '@/utils/imageUpload';
+import DestacarPetModal from '../app/components/DestacarPetModal';
+import { useMembership } from '../hooks/useMembership';
 
 // Definir el tipo para las mascotas
 type Pet = {
@@ -27,25 +29,42 @@ type Pet = {
   description: string | null;
   image_url: string | null;
   owner_id: string;
+  images: string[] | null;
+  interest?: string[];
 };
 
-type EditPetModalProps = {
+interface EditPetModalProps {
   visible: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onEditPet: (pet: Pet) => void;
   pet: Pet | null;
 };
 
-export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditPetModalProps) {
+const BASE_INTERESES = [
+  'Jugar',
+  'Pasear',
+  'Dormir',
+  'Comer',
+  'Correr',
+  'Socializar',
+  'Aprender trucos',
+  'Nadar',
+];
+
+export default function EditPetModal({ visible, onClose, onEditPet, pet }: EditPetModalProps) {
   const [name, setName] = useState('');
   const [species, setSpecies] = useState('');
   const [breed, setBreed] = useState('');
   const [age, setAge] = useState('');
   const [description, setDescription] = useState('');
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDestacarPet, setShowDestacarPet] = useState(false);
+const [interest, setIntereses] = useState<string[]>([]);
+  const { membership } = useMembership();
+  const maxImages = membership?.max_photos_per_pet || 1; // Default to 1 if no membership
 
   // Cargar los datos de la mascota cuando cambia el prop pet
   useEffect(() => {
@@ -55,7 +74,15 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
       setBreed(pet.breed || '');
       setAge(pet.age || '');
       setDescription(pet.description || '');
-      setImageUri(pet.image_url);
+      // Preferir la galería si existe, sino usar principal
+      if (pet.images && Array.isArray(pet.images) && pet.images.length > 0) {
+        setImages(pet.images);
+      } else if (pet.image_url) {
+        setImages([pet.image_url]);
+      } else {
+        setImages([]);
+      }
+      setIntereses(pet.interest || []);
     }
   }, [pet]);
 
@@ -66,10 +93,11 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
     setBreed('');
     setAge('');
     setDescription('');
-    setImageUri(null);
+    setImages([]);
     setIsUploading(false);
     setUploadProgress(0);
     setIsSubmitting(false);
+    setIntereses([]);
   };
 
   const handleClose = () => {
@@ -79,6 +107,10 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
 
   // Función para seleccionar una imagen de la galería
   const pickImage = async () => {
+    if (images.length >= maxImages) {
+      Alert.alert('Límite de imágenes', `Solo puedes subir hasta ${maxImages} imágenes para tu mascota.`);
+      return;
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -88,7 +120,7 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImageUri(result.assets[0].uri);
+        setImages([...images, result.assets[0].uri]);
       }
     } catch (error) {
       console.error('Error al seleccionar imagen:', error);
@@ -98,6 +130,10 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
 
   // Función para tomar una foto con la cámara
   const takePhoto = async () => {
+    if (images.length >= maxImages) {
+      Alert.alert('Límite de imágenes', `Solo puedes subir hasta ${maxImages} imágenes para tu mascota.`);
+      return;
+    }
     try {
       const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
       
@@ -113,11 +149,25 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImageUri(result.assets[0].uri);
+        setImages([...images, result.assets[0].uri]);
       }
     } catch (error) {
       console.error('Error al tomar foto:', error);
       Alert.alert('Error', 'No se pudo tomar la foto. Inténtalo de nuevo.');
+    }
+  };
+
+  // Función para eliminar una imagen
+  const removeImage = async (idx: number) => {
+    const imageToRemove = images[idx];
+    setImages(images.filter((img, index) => index !== idx));
+    // Eliminar del bucket si es una URL pública (no local)
+    if (imageToRemove && imageToRemove.startsWith('http')) {
+      try {
+        await deleteImageByPublicUrl(imageToRemove);
+      } catch (err) {
+        console.error('Error al eliminar la imagen del bucket:', err);
+      }
     }
   };
 
@@ -136,43 +186,49 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
     try {
       setIsSubmitting(true);
       
-      // Si hay una nueva imagen, subirla primero
-      let finalImageUrl = pet.image_url;
-      
-      if (imageUri && imageUri !== pet.image_url) {
+      // Subir imágenes y obtener URLs
+      let imageUrls: string[] = [];
+      if (images.length > 0) {
         setIsUploading(true);
         try {
-          finalImageUrl = await uploadImage(imageUri, setUploadProgress);
-        } catch (error: any) {
-          console.error('Error al subir imagen:', error);
-          Alert.alert('Error', `No se pudo subir la imagen: ${error.message}`);
-          setIsUploading(false);
-          setIsSubmitting(false);
-          return;
+          imageUrls = await Promise.all(images.map(async (image) => {
+            return await uploadImage(image);
+          }));
+        } catch (err) {
+          throw new Error('Error al subir imágenes');
         }
         setIsUploading(false);
       }
       
-      // Actualizar los datos de la mascota en Supabase
+      // Actualizar los datos de la mascota
       const { error } = await supabase
         .from('pets')
         .update({
-          name,
-          species,
-          breed: breed || null,
-          age: age || null,
-          description: description || null,
-          image_url: finalImageUrl,
-          updated_at: new Date().toISOString()
+          name: name.trim(),
+          species: species.trim(),
+          breed: breed ? breed.trim() : null,
+          age: age ? age.trim() : null,
+          description: description ? description.trim() : null,
+          image_url: imageUrls[0] || null,
+          images: imageUrls.length > 0 ? imageUrls : null,
+          interest: interest,
         })
         .eq('id', pet.id);
       
       if (error) {
         throw new Error(error.message);
       }
-      
+      // Obtener el registro actualizado desde Supabase
+      const { data: updatedPets, error: fetchError } = await supabase
+        .from('pets')
+        .select('*')
+        .eq('id', pet.id)
+        .single();
+      if (fetchError) {
+        throw new Error(fetchError.message);
+      }
       Alert.alert('Éxito', 'Mascota actualizada correctamente');
-      onSuccess();
+      onEditPet(updatedPets);
       handleClose();
       
     } catch (error: any) {
@@ -209,32 +265,45 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
             try {
               console.log('Iniciando proceso de eliminación...');
               setIsSubmitting(true);
-              
               // Verificar que el usuario esté autenticado
               const { data: { session } } = await supabase.auth.getSession();
               if (!session) {
                 throw new Error('No hay sesión activa. Por favor, inicia sesión nuevamente.');
               }
-              
               // Verificar que la mascota pertenezca al usuario actual
               const { data: petData, error: petError } = await supabase
                 .from('pets')
                 .select('*')
                 .eq('id', pet.id)
                 .single();
-                
               if (petError) {
                 throw new Error(`Error al verificar la mascota: ${petError.message}`);
               }
-              
               if (!petData) {
                 throw new Error('No se encontró la mascota');
               }
-              
               if (petData.owner_id !== session.user.id) {
                 throw new Error('No tienes permiso para eliminar esta mascota');
               }
-              
+              // Eliminar imágenes del bucket
+              if (petData.images && Array.isArray(petData.images)) {
+                for (const url of petData.images) {
+                  if (url && url.startsWith('http')) {
+                    try {
+                      await deleteImageByPublicUrl(url);
+                    } catch (err) {
+                      console.error('Error al eliminar imagen del bucket:', err);
+                    }
+                  }
+                }
+              } else if (petData.image_url && petData.image_url.startsWith('http')) {
+                // Eliminar la imagen principal si existe
+                try {
+                  await deleteImageByPublicUrl(petData.image_url);
+                } catch (err) {
+                  console.error('Error al eliminar imagen principal del bucket:', err);
+                }
+              }
               // Eliminar la mascota de Supabase
               console.log('Enviando solicitud a Supabase para eliminar mascota...');
               const { data, error } = await supabase
@@ -242,18 +311,14 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
                 .delete()
                 .eq('id', pet.id)
                 .select();
-              
               console.log('Respuesta de Supabase:', { data, error });
-              
               if (error) {
                 throw new Error(error.message);
               }
-              
               console.log('Mascota eliminada con éxito');
               Alert.alert('Éxito', 'Mascota eliminada correctamente');
-              onSuccess();
+              onClose();
               handleClose();
-              
             } catch (error: any) {
               console.error('Error al eliminar mascota:', error);
               Alert.alert('Error', `No se pudo eliminar la mascota: ${error.message}`);
@@ -283,38 +348,147 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
           </View>
           
           <ScrollView style={styles.formContainer}>
-            {/* Sección de imagen */}
-            <View style={styles.imageSection}>
-              {imageUri ? (
-                <View style={styles.imagePreviewContainer}>
-                  <Image source={{ uri: imageUri }} style={styles.imagePreview} />
-                  <TouchableOpacity 
-                    style={styles.changeImageButton}
-                    onPress={pickImage}
+            {/* Galería de imágenes con reordenamiento y principal */}
+            <Text style={styles.label}>Fotos</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {images.map((img, idx) => (
+                <View key={idx} style={{ marginRight: 10, position: 'relative' }}>
+                  <Image
+                    source={{ uri: img }}
+                    style={{ width: 80, height: 80, borderRadius: 8, borderWidth: 2, borderColor: idx === 0 ? '#ffbc4c' : '#eee' }}
+                  />
+                  {/* Botón para marcar como principal */}
+                  {idx !== 0 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        bottom: 2,
+                        left: 2,
+                        backgroundColor: '#ffbc4c',
+                        borderRadius: 10,
+                        paddingHorizontal: 4,
+                        paddingVertical: 2,
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        const [selected] = newImages.splice(idx, 1);
+                        setImages([selected, ...newImages]);
+                      }}
+                    >
+                      <Text style={{ color: '#222', fontWeight: 'bold', fontSize: 10 }}>Hacer principal</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Indicador de principal */}
+                  {idx === 0 && (
+                    <View style={{ position: 'absolute', bottom: 2, right: 2, backgroundColor: '#ffbc4c', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: '#222', fontWeight: 'bold', fontSize: 10 }}>Principal</Text>
+                    </View>
+                  )}
+                  {/* Botón para mover a la izquierda */}
+                  {idx > 0 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        left: 2,
+                        backgroundColor: '#eee',
+                        borderRadius: 10,
+                        width: 20,
+                        height: 20,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        [newImages[idx - 1], newImages[idx]] = [newImages[idx], newImages[idx - 1]];
+                        setImages(newImages);
+                      }}
+                    >
+                      <Text style={{ color: '#666', fontWeight: 'bold', fontSize: 14 }}>{'<'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Botón para mover a la derecha */}
+                  {idx < images.length - 1 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        right: 24,
+                        backgroundColor: '#eee',
+                        borderRadius: 10,
+                        width: 20,
+                        height: 20,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        [newImages[idx + 1], newImages[idx]] = [newImages[idx], newImages[idx + 1]];
+                        setImages(newImages);
+                      }}
+                    >
+                      <Text style={{ color: '#666', fontWeight: 'bold', fontSize: 14 }}>{'>'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Botón para eliminar imagen */}
+                  <TouchableOpacity
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      right: 2,
+                      backgroundColor: 'rgba(0,0,0,0.6)',
+                      borderRadius: 10,
+                      width: 20,
+                      height: 20,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 2,
+                    }}
+                    onPress={() => removeImage(idx)}
+                    disabled={isSubmitting}
                   >
-                    <Text style={styles.changeImageText}>Cambiar imagen</Text>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>×</Text>
                   </TouchableOpacity>
                 </View>
-              ) : (
-                <View style={styles.imagePlaceholder}>
-                  <TouchableOpacity 
-                    style={styles.imageButton} 
-                    onPress={pickImage}
-                  >
-                    <Upload size={24} color="#ffbc4c" />
-                    <Text style={styles.imageButtonText}>Galería</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.imageButton}
-                    onPress={takePhoto}
-                  >
-                    <Camera size={24} color="#ffbc4c" />
-                    <Text style={styles.imageButtonText}>Cámara</Text>
-                  </TouchableOpacity>
-                </View>
+              ))}
+              {images.length < maxImages && (
+                <TouchableOpacity
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 8,
+                    backgroundColor: '#f3f3f3',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: '#ddd',
+                  }}
+                  onPress={pickImage}
+                  disabled={images.length >= maxImages || isSubmitting}
+                >
+                  <Text style={{ color: '#bbb', fontSize: 32 }}>+</Text>
+                </TouchableOpacity>
               )}
-            </View>
-            
+            </ScrollView>
+
+            {/* Botón Destacar Mascota */}
+            <TouchableOpacity
+              style={[
+                styles.destacarButton,
+                isSubmitting && styles.saveButtonDisabled
+              ]}
+              onPress={() => setShowDestacarPet(true)}
+              disabled={isSubmitting || isUploading}
+            >
+              <Text style={styles.destacarButtonText}>Destacar Mascota</Text>
+            </TouchableOpacity>
+
+            {/* Espacio */}
+            <View style={{ height: 20 }} />
+
             {/* Formulario */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Nombre *</Text>
@@ -329,13 +503,27 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Especie *</Text>
-              <TextInput
-                style={styles.input}
-                value={species}
-                onChangeText={setSpecies}
-                placeholder="Perro, gato, etc."
-                placeholderTextColor="#aaa"
-              />
+              <View style={styles.speciesContainer}>
+                {['Perro', 'Gato', 'Otros'].map(option => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.speciesButton,
+                      species === option && styles.speciesButtonSelected,
+                      isSubmitting && styles.disabledButton
+                    ]}
+                    onPress={() => setSpecies(option)}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={[
+                      styles.speciesButtonText,
+                      species === option && styles.speciesButtonTextSelected
+                    ]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
             
             <View style={styles.inputGroup}>
@@ -373,9 +561,47 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
                 textAlignVertical="top"
               />
             </View>
-            
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Intereses</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {BASE_INTERESES.map((interes) => {
+                  const isSelected = interest.includes(interes);
+                  const limite = maxImages > 3 ? 5 : 3;
+                  return (
+                    <TouchableOpacity
+                      key={interes}
+                      style={{
+                        backgroundColor: isSelected ? '#ffbc4c' : '#f5f5f5',
+                        borderRadius: 16,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        margin: 4,
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#ffbc4c' : '#ccc',
+                      }}
+                      onPress={() => {
+                        if (!isSelected && interest.length >= limite) {
+                          Alert.alert('Límite de intereses', `Solo puedes seleccionar hasta ${limite} intereses con tu membresía.`);
+                          return;
+                        }
+                        setIntereses((prev) =>
+                          isSelected
+                            ? prev.filter((i) => i !== interes)
+                            : [...prev, interes]
+                        );
+                      }}
+                    >
+                      <Text style={{ color: isSelected ? '#fff' : '#333' }}>{interes}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
             {/* Botón de guardar */}
             <TouchableOpacity
+/* ... */
               style={[
                 styles.saveButton,
                 (isSubmitting || isUploading) && styles.saveButtonDisabled
@@ -415,12 +641,19 @@ export default function EditPetModal({ visible, onClose, onSuccess, pet }: EditP
                   <Text style={styles.deleteButtonText}>Eliminando...</Text>
                 </View>
               ) : (
-                <>
-                  <Trash2 size={20} color="#fff" />
-                  <Text style={styles.deleteButtonText}>Eliminar Mascota</Text>
-                </>
+                <Text style={styles.deleteButtonText}>Eliminar Mascota</Text>
               )}
             </TouchableOpacity>
+
+            
+            {/* Modal real para destacar mascota */}
+            {showDestacarPet && pet && (
+              <DestacarPetModal
+                visible={showDestacarPet}
+                petId={pet.id}
+                onClose={() => setShowDestacarPet(false)}
+              />
+            )}
           </ScrollView>
         </View>
       </View>
@@ -478,52 +711,12 @@ const styles = StyleSheet.create({
   formContainer: {
     padding: 20,
   },
-  imageSection: {
-    marginBottom: 20,
-  },
-  imagePlaceholder: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 10,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderStyle: 'dashed',
-  },
-  imageButton: {
-    alignItems: 'center',
-    padding: 15,
-  },
-  imageButtonText: {
-    marginTop: 8,
-    color: '#666',
-  },
-  imagePreviewContainer: {
-    alignItems: 'center',
-  },
-  imagePreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  changeImageButton: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-  },
-  changeImageText: {
-    color: '#666',
-    fontSize: 14,
-  },
   inputGroup: {
     marginBottom: 15,
   },
   label: {
     fontSize: 16,
+    fontWeight: 'bold',
     marginBottom: 5,
     color: '#333',
   },
@@ -538,6 +731,35 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 100,
+  },
+  speciesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  speciesButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  speciesButtonSelected: {
+    backgroundColor: '#ffbc4c',
+    borderColor: '#ffbc4c',
+  },
+  speciesButtonText: {
+    color: '#666',
+    fontWeight: '600',
+  },
+  speciesButtonTextSelected: {
+    color: '#222',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   saveButton: {
     backgroundColor: '#ffbc4c',
@@ -593,5 +815,34 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  destacarButton: {
+    backgroundColor: '#fbaa30',
+    borderRadius: 22,
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    marginTop: 12,
+    marginBottom: 5,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: '#fbaa30',
+    shadowOpacity: 0.18,
+    shadowRadius: 9,
+    elevation: 3,
+    borderWidth: 0,
+  },
+  destacarButtonDisabled: {
+    opacity: 0.6,
+  },
+  destacarButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 19,
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    textShadowColor: '#ffedbc',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

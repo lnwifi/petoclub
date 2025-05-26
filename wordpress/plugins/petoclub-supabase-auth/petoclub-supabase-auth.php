@@ -44,6 +44,10 @@ class PetoClubSupabaseAuth {
         require_once plugin_dir_path(__FILE__) . 'includes/mercadopago-webhook.php';
         require_once plugin_dir_path(__FILE__) . 'includes/woocommerce-integration.php';
         require_once plugin_dir_path(__FILE__) . 'includes/rest-api.php';
+        // Incluir el nuevo endpoint de sincronización de carrito
+        require_once plugin_dir_path(__FILE__) . 'includes/cart-sync-endpoint.php';
+        // Incluir el NUEVO endpoint robusto
+        require_once plugin_dir_path(__FILE__) . 'includes/petoclub-cart-sync.php';
     }
 
     public function enqueue_scripts() {
@@ -115,6 +119,43 @@ class PetoClubSupabaseAuth {
         return $user;
     }
 }
+
+// --- CORS definitivo para REST API (robusto, fuerza headers en cualquier caso) ---
+add_action('init', function() {
+    // Solo para REST API
+    if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '/wp-json/') === 0) {
+        header('Access-Control-Allow-Origin: http://localhost:8081');
+        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type');
+        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+            status_header(200);
+            exit;
+        }
+    }
+}, 0);
+
+// --- Habilitar CORS para desarrollo local (localhost:8081) ---
+add_action('rest_api_init', function () {
+    remove_filter('rest_pre_serve_request', 'rest_send_cors_headers');
+    add_filter('rest_pre_serve_request', function ($value) {
+        header('Access-Control-Allow-Origin: http://localhost:8081');
+        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type');
+        return $value;
+    });
+});
+
+// --- Habilitar CORS para desarrollo local (localhost:8081) también en send_headers global ---
+add_action('send_headers', function() {
+    if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] === 'http://localhost:8081') {
+        header('Access-Control-Allow-Origin: http://localhost:8081');
+        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type');
+    }
+});
 
 // Inicializar el plugin
 PetoClubSupabaseAuth::get_instance();

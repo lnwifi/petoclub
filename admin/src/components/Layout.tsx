@@ -43,6 +43,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Usuarios', icon: <PeopleIcon />, path: '/usuarios' },
   { text: 'Mascotas', icon: <PetsIcon />, path: '/mascotas' },
+  { text: 'Locales', icon: <HomeIcon />, path: '/locales' },
   { text: 'Refugios', icon: <HomeIcon />, path: '/refugios' },
   { text: 'Membresías', icon: <MembershipIcon />, path: '/memberships' },
   { text: 'Cupones', icon: <CouponIcon />, path: '/cupones' },

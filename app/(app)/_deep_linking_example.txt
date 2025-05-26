@@ -1,0 +1,28 @@
+# Deep Linking setup (ejemplo para Expo/React Native)
+
+// 1. En app.json o app.config.js agrega:
+//   "scheme": "petoclub"
+//   "platforms": ["ios", "android", "web"]
+//
+// 2. En tu componente raíz (por ejemplo, _layout.tsx):
+//
+//   import * as Linking from 'expo-linking';
+//   const linking = {
+//     prefixes: ['petoclub://', 'https://tudominio.com'],
+//     config: {
+//       screens: {
+//         membershipsSuccess: 'memberships-success',
+//         // ...otras rutas
+//       },
+//     },
+//   };
+//   <NavigationContainer linking={linking} ... >
+//
+// 3. En MercadoPago, configura la URL de retorno:
+//     petoclub://memberships-success
+//   o para web:
+//     https://tudominio.com/memberships-success
+//
+// 4. En memberships.tsx, después del pago, puedes sugerirle al usuario volver manualmente si no se redirige automáticamente.
+
+// Si necesitas ayuda para integrar esto en tu código real, dime si usas Expo Router, React Navigation, etc.

@@ -1,33 +1,44 @@
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, Image } from 'react-native';
-import { Link, router } from 'expo-router';
+import { Link, router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 
 export default function ForgotPassword() {
   const { resetPassword, loading } = useAuth();
   const [email, setEmail] = useState('');
+  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const params = useLocalSearchParams();
 
   const handleResetPassword = async () => {
+    setMessage(null);
     if (!email) {
-      Alert.alert('Error', 'Por favor ingresa tu correo electrónico');
+      setMessage({ type: 'error', text: 'Por favor ingresa tu correo electrónico' });
       return;
     }
 
     const { error } = await resetPassword(email);
     if (!error) {
-      // Redirigir al login después de enviar el correo
-      router.replace('/(auth)/login');
+      setMessage({ type: 'success', text: '¡Correo de recuperación enviado! Revisa tu correo.' });
+    } else {
+      setMessage({ type: 'error', text: error.message || 'No se pudo enviar el correo de recuperación.' });
     }
   };
 
   return (
     <View style={styles.container}>
-      <Image 
-        source={require('@/assets/images/petclub-logo.svg')} 
-        style={styles.logo} 
-        resizeMode="contain"
-      />
+      <View style={styles.logoContainer}>
+        <Image 
+          source={require('@/assets/images/logo.png')} 
+          style={styles.logo} 
+          resizeMode="contain"
+        />
+      </View>
       <View style={styles.form}>
+        {message && (
+          <View style={{ marginBottom: 10, backgroundColor: message.type === 'error' ? '#ffdddd' : '#ddffdd', padding: 10, borderRadius: 6 }}>
+            <Text style={{ color: message.type === 'error' ? '#b00' : '#080', textAlign: 'center', fontFamily: 'Inter_400Regular' }}>{message.text}</Text>
+          </View>
+        )}
         <Text style={styles.subtitle}>Recuperación de Contraseña</Text>
         <Text style={styles.description}>
           Ingresa tu correo electrónico y te enviaremos instrucciones para restablecer tu contraseña.
@@ -66,11 +77,26 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#fff',
   },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+    paddingHorizontal: 20,
+  },
   logo: {
-    width: 200,
-    height: 80,
+    width: '100%',
+    maxWidth: 350,
+    height: 130,
     alignSelf: 'center',
-    marginBottom: 20,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 16,
+    borderRadius: 10,
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    width: '100%',
+    marginBottom: 16,
   },
   subtitle: {
     fontSize: 20,
@@ -87,14 +113,9 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: 16,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
-    borderRadius: 8,
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
+    width: '100%',
+    maxWidth: 450,
+    alignSelf: 'center',
   },
   button: {
     backgroundColor: '#ffbc4c',

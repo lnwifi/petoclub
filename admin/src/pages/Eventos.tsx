@@ -37,8 +37,7 @@ import {
   Visibility as ViewIcon,
   Event as EventIcon,
   LocationOn as LocationIcon,
-  AccessTime as TimeIcon,
-  Image as ImageIcon
+  AccessTime as TimeIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -46,6 +45,7 @@ import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { es } from 'date-fns/locale';
+import { PhotoCamera } from '@mui/icons-material';
 
 // Tipo para los eventos
 type Event = {
@@ -75,7 +75,7 @@ export default function Eventos() {
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openViewDialog, setOpenViewDialog] = useState(false);
   const [currentEvent, setCurrentEvent] = useState<Event | null>(null);
-  const [formData, setFormData] = useState<Partial<Event>>({
+  const [formData, setFormData] = useState({
     title: '',
     description: '',
     image_url: '',
@@ -86,7 +86,7 @@ export default function Eventos() {
     event_type: 'adopcion',
     is_featured: false,
     is_active: true,
-    max_participants: 50,
+    max_participants: null as number | null,
     current_participants: 0
   });
   const [snackbar, setSnackbar] = useState({
@@ -94,6 +94,18 @@ export default function Eventos() {
     message: '',
     severity: 'success' as 'success' | 'error' | 'info' | 'warning'
   });
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const uploadEventImage = async (file: File) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2,8)}.${fileExt}`;
+    const filePath = `${fileName}`;
+    const { error } = await supabase.storage.from('eventos').upload(filePath, file, { upsert: true });
+    if (error) throw error;
+    const { publicUrl } = supabase.storage.from('eventos').getPublicUrl(filePath).data;
+    return publicUrl;
+  };
 
   // Cargar eventos
   useEffect(() => {
@@ -105,71 +117,13 @@ export default function Eventos() {
         const { data: eventData, error: eventError } = await supabase
           .from('events')
           .select('*')
+          .eq('is_active', true)
+          .gte('event_date', new Date().toISOString().split('T')[0])
           .order('event_date', { ascending: true });
         
         if (eventError) throw eventError;
-        
-        // Si no hay datos reales, usar datos de ejemplo
-        if (!eventData || eventData.length === 0) {
-          // Datos de ejemplo
-          const mockEvents: Event[] = [
-            {
-              id: '1',
-              title: 'Jornada de adopción',
-              description: 'Ven a conocer a nuestros amigos peludos que buscan un hogar',
-              image_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b',
-              location: 'Parque Centenario, Buenos Aires',
-              event_date: '2024-01-15T00:00:00Z',
-              start_time: '10:00',
-              end_time: '16:00',
-              event_type: 'adopcion',
-              is_featured: true,
-              is_active: true,
-              max_participants: 100,
-              current_participants: 45,
-              created_at: '2023-12-01T10:30:00Z',
-              organizer_name: 'Refugio Patitas Felices'
-            },
-            {
-              id: '2',
-              title: 'Campaña de vacunación gratuita',
-              description: 'Vacunación antirrábica para perros y gatos',
-              image_url: 'https://images.unsplash.com/photo-1612531385446-f7e6d131e1d0',
-              location: 'Plaza San Martín, Córdoba',
-              event_date: '2024-02-20T00:00:00Z',
-              start_time: '09:00',
-              end_time: '14:00',
-              event_type: 'salud',
-              is_featured: false,
-              is_active: true,
-              max_participants: 200,
-              current_participants: 0,
-              created_at: '2023-12-15T14:45:00Z',
-              organizer_name: 'Municipalidad de Córdoba'
-            },
-            {
-              id: '3',
-              title: 'Taller de adiestramiento canino',
-              description: 'Aprende técnicas básicas para educar a tu mascota',
-              image_url: 'https://images.unsplash.com/photo-1534361960057-19889db9621e',
-              location: 'Club Canino, Rosario',
-              event_date: '2024-01-30T00:00:00Z',
-              start_time: '15:00',
-              end_time: '17:30',
-              event_type: 'educacion',
-              is_featured: true,
-              is_active: true,
-              max_participants: 30,
-              current_participants: 25,
-              created_at: '2023-12-10T09:15:00Z',
-              organizer_name: 'Club Canino Rosario'
-            }
-          ];
-          setEvents(mockEvents);
-        } else {
-          // Transformar datos reales al formato esperado
-          setEvents(eventData);
-        }
+        setEvents(eventData || []);
+        setLoading(false);
       } catch (error) {
         console.error('Error al cargar eventos:', error);
         setSnackbar({
@@ -177,8 +131,6 @@ export default function Eventos() {
           message: 'Error al cargar los eventos',
           severity: 'error'
         });
-      } finally {
-        setLoading(false);
       }
     };
 
@@ -203,6 +155,7 @@ export default function Eventos() {
         max_participants: event.max_participants,
         current_participants: event.current_participants
       });
+      setImageFile(null);
     } else {
       setCurrentEvent(null);
       setFormData({
@@ -216,9 +169,10 @@ export default function Eventos() {
         event_type: 'adopcion',
         is_featured: false,
         is_active: true,
-        max_participants: 50,
+        max_participants: null,
         current_participants: 0
       });
+      setImageFile(null);
     }
     setOpenDialog(true);
   };
@@ -297,12 +251,18 @@ export default function Eventos() {
       // En una implementación real, aquí se enviaría a la base de datos
       if (currentEvent) {
         // Actualizar evento existente
+        let imageUrl = formData.image_url || '';
+        if (imageFile) {
+          setUploadingImage(true);
+          imageUrl = await uploadEventImage(imageFile);
+          setUploadingImage(false);
+        }
         const { error } = await supabase
           .from('events')
           .update({
             title: formData.title,
             description: formData.description,
-            image_url: formData.image_url,
+            image_url: imageUrl,
             location: formData.location,
             event_date: formData.event_date,
             start_time: formData.start_time,
@@ -310,7 +270,8 @@ export default function Eventos() {
             event_type: formData.event_type,
             is_featured: formData.is_featured,
             is_active: formData.is_active,
-            max_participants: formData.max_participants
+            max_participants: formData.max_participants,
+            current_participants: formData.current_participants
           })
           .eq('id', currentEvent.id);
 
@@ -323,7 +284,7 @@ export default function Eventos() {
             ...e, 
             title: formData.title || e.title,
             description: formData.description || e.description,
-            image_url: formData.image_url || e.image_url,
+            image_url: imageUrl || e.image_url,
             location: formData.location || e.location,
             event_date: formData.event_date || e.event_date,
             start_time: formData.start_time || e.start_time,
@@ -331,7 +292,8 @@ export default function Eventos() {
             event_type: formData.event_type || e.event_type,
             is_featured: formData.is_featured !== undefined ? formData.is_featured : e.is_featured,
             is_active: formData.is_active !== undefined ? formData.is_active : e.is_active,
-            max_participants: formData.max_participants !== undefined ? formData.max_participants : e.max_participants
+            max_participants: formData.max_participants !== undefined ? formData.max_participants : e.max_participants,
+            current_participants: formData.current_participants !== undefined ? formData.current_participants : e.current_participants
           } : e
         );
         setEvents(updatedEvents);
@@ -342,13 +304,19 @@ export default function Eventos() {
         });
       } else {
         // Crear nuevo evento
+        let imageUrl = '';
+        if (imageFile) {
+          setUploadingImage(true);
+          imageUrl = await uploadEventImage(imageFile);
+          setUploadingImage(false);
+        }
         const { data, error } = await supabase
           .from('events')
           .insert([
             {
               title: formData.title,
               description: formData.description,
-              image_url: formData.image_url,
+              image_url: imageUrl,
               location: formData.location,
               event_date: formData.event_date,
               start_time: formData.start_time,
@@ -357,7 +325,7 @@ export default function Eventos() {
               is_featured: formData.is_featured,
               is_active: formData.is_active,
               max_participants: formData.max_participants,
-              current_participants: 0,
+              current_participants: formData.current_participants,
               created_at: new Date().toISOString(),
               organizer_id: null, // En una implementación real, aquí iría el ID del organizador
               organizer_name: 'PetoClub' // En una implementación real, aquí iría el nombre del organizador
@@ -376,7 +344,7 @@ export default function Eventos() {
             id: `${Date.now()}`,
             title: formData.title || '',
             description: formData.description || '',
-            image_url: formData.image_url || '',
+            image_url: imageUrl || '',
             location: formData.location || '',
             event_date: formData.event_date || new Date().toISOString(),
             start_time: formData.start_time || '10:00',
@@ -384,8 +352,8 @@ export default function Eventos() {
             event_type: formData.event_type || 'adopcion',
             is_featured: formData.is_featured !== undefined ? formData.is_featured : false,
             is_active: formData.is_active !== undefined ? formData.is_active : true,
-            max_participants: formData.max_participants || 50,
-            current_participants: 0,
+            max_participants: formData.max_participants,
+            current_participants: formData.current_participants,
             created_at: new Date().toISOString(),
             organizer_name: 'PetoClub'
           };
@@ -399,6 +367,7 @@ export default function Eventos() {
         });
       }
     } catch (error) {
+      setUploadingImage(false);
       console.error('Error al guardar el evento:', error);
       setSnackbar({
         open: true,
@@ -407,6 +376,7 @@ export default function Eventos() {
       });
     } finally {
       handleCloseDialog();
+      setImageFile(null);
     }
   };
 
@@ -570,25 +540,32 @@ export default function Eventos() {
                 </TableCell>
                 <TableCell>
                   <Typography variant="body2">
-                    {event.current_participants} / {event.max_participants}
+                    {event.max_participants !== null 
+                      ? `${event.current_participants || 0} / ${event.max_participants}`
+                      : `${event.current_participants || 0} (Sin límite)`
+                    }
                   </Typography>
-                  <Box 
-                    sx={{ 
-                      width: '100%', 
-                      backgroundColor: '#eee', 
-                      height: 4, 
-                      borderRadius: 2,
-                      mt: 0.5
-                    }}
-                  >
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                    <Typography variant="body2" sx={{ mr: 1 }}>
+                      {event.current_participants} / {event.max_participants}
+                    </Typography>
                     <Box 
                       sx={{ 
-                        width: `${(event.current_participants / event.max_participants) * 100}%`, 
-                        backgroundColor: 'primary.main', 
-                        height: 4, 
-                        borderRadius: 2 
-                      }} 
-                    />
+                        flexGrow: 1,
+                        backgroundColor: '#eee', 
+                        height: 8, 
+                        borderRadius: 4
+                      }}
+                    >
+                      <Box 
+                        sx={{ 
+                          width: `${(event.current_participants / (event.max_participants || 1)) * 100}%`, 
+                          backgroundColor: 'primary.main', 
+                          height: 8, 
+                          borderRadius: 4 
+                        }} 
+                      />
+                    </Box>
                   </Box>
                 </TableCell>
                 <TableCell align="center">
@@ -638,15 +615,6 @@ export default function Eventos() {
                 fullWidth
                 value={formData.image_url}
                 onChange={handleFormChange}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton edge="end">
-                        <ImageIcon />
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
               />
             </Grid>
             <Grid item xs={12}>
@@ -659,6 +627,39 @@ export default function Eventos() {
                 value={formData.description}
                 onChange={handleFormChange}
               />
+            </Grid>
+            <Grid item xs={12}>
+              <Button
+                variant="outlined"
+                component="label"
+                startIcon={<PhotoCamera />}
+                fullWidth
+                sx={{ mb: 1 }}
+                disabled={uploadingImage}
+              >
+                {formData.image_url || imageFile ? 'Cambiar imagen' : 'Subir imagen'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      setImageFile(e.target.files[0]);
+                      setFormData(prev => ({ ...prev, image_url: '' }));
+                    }
+                  }}
+                />
+              </Button>
+              {(imageFile || formData.image_url) && (
+                <Box mt={1} mb={1} display="flex" justifyContent="center">
+                  <img
+                    src={imageFile ? URL.createObjectURL(imageFile) : formData.image_url}
+                    alt="Evento"
+                    style={{ maxHeight: 180, borderRadius: 8, boxShadow: '0 1px 8px #0002' }}
+                  />
+                </Box>
+              )}
+              {uploadingImage && <Typography color="primary">Subiendo imagen...</Typography>}
             </Grid>
             <Grid item xs={12} md={6}>
               <TextField
@@ -730,10 +731,18 @@ export default function Eventos() {
               <TextField
                 name="max_participants"
                 label="Máximo de participantes"
-                fullWidth
                 type="number"
-                value={formData.max_participants}
-                onChange={handleFormChange}
+                fullWidth
+                value={formData.max_participants || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFormData({
+                    ...formData,
+                    max_participants: value ? parseInt(value, 10) : null
+                  });
+                }}
+                inputProps={{ min: 1 }}
+                helperText="Deja vacío si no hay límite"
               />
             </Grid>
             <Grid item xs={12} md={4}>

@@ -114,8 +114,9 @@ BEGIN
             WHERE (m.pet_id_1 = user_pet_id AND m.pet_id_2 = p.id)
             OR (m.pet_id_1 = p.id AND m.pet_id_2 = user_pet_id)
         )
-        -- La mascota está activa (no eliminada)
+        -- La mascota está activa (no eliminada y is_active = true)
         AND p.deleted_at IS NULL
+        AND p.is_active = true
     ORDER BY 
         -- Priorizar mascotas con fotos
         CASE WHEN p.image_url IS NOT NULL THEN 0 ELSE 1 END,
@@ -180,8 +181,8 @@ BEGIN
         (m.pet_id_1 = user_pet_id AND m.pet_id_2 = p.id) 
         OR (m.pet_id_2 = user_pet_id AND m.pet_id_1 = p.id)
     WHERE 
-        (m.pet_id_1 = user_pet_id AND m.status_2 = 'pending' AND m.status_1 = 'accepted')
-        OR (m.pet_id_2 = user_pet_id AND m.status_1 = 'pending' AND m.status_2 = 'accepted')
+        (m.pet_id_1 = user_pet_id AND m.status_2 = 'pending')
+        OR (m.pet_id_2 = user_pet_id AND m.status_1 = 'pending')
     ORDER BY m.created_at DESC;
 END;
 $$ LANGUAGE plpgsql;

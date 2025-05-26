@@ -91,26 +91,9 @@ export default function Usuarios() {
         
         // Usar la función RPC personalizada que ignora las políticas de seguridad (RLS)
         // Esta función verifica si el usuario es administrador y devuelve todos los perfiles
-        const { data: userData, error: userError } = await supabase
-          .rpc('get_all_profiles')
-          .order('created_at', { ascending: false });
-          
-        console.log('Consulta RPC ejecutada, verificando resultados...');
-
-        if (userError) {
-          console.error('Error detallado al cargar usuarios:', userError);
-          throw userError;
-        }
-
-        if (!userData) {
-          throw new Error('No se recibieron datos de la consulta');
-        }
-
-        console.log('Datos recibidos:', userData);
-        console.log('Número de usuarios encontrados:', userData.length);
-
-        // Transformar datos al formato esperado
-        const formattedUsers = userData.map(profile => ({
+        const { data: userData, error: userError } = await supabase.rpc('get_all_profiles');
+        // Si necesitas ordenar por fecha de creación, hazlo en el frontend:
+        let formattedUsers = (userData || []).map(profile => ({
           id: profile.profile_id,
           email: profile.email,
           full_name: profile.full_name || profile.email?.split('@')[0] || 'Sin nombre',
@@ -121,6 +104,8 @@ export default function Usuarios() {
           membership_type: 'Básico', // No existe en la tabla
           is_active: true // No existe en la tabla
         }));
+        // Ordenar por fecha de creación descendente
+        formattedUsers = formattedUsers.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
         console.log('Usuarios formateados:', formattedUsers);
 
@@ -421,8 +406,8 @@ export default function Usuarios() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
+            {users.map((user, idx) => (
+              <TableRow key={user.id || idx}>
                 <TableCell>
                   <Avatar 
                     src={user.avatar_url} 

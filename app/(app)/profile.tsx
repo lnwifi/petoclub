@@ -1,11 +1,12 @@
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
-import { Settings, CreditCard, Heart, MapPin, LogOut, Ticket, Gift, ShoppingBag } from 'lucide-react-native';
-import { useAuth } from '@/lib/auth-context';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
+import { Settings, CreditCard, Heart, MapPin, LogOut, Ticket, ShoppingBag } from 'lucide-react-native';
+import { useAuth } from '../../lib/auth-context';
 import { router } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import OrderNotifications from '@/components/OrderNotifications';
+import { getCurrentUserId } from '../lib/getCurrentUserId';
 
 type UserMembership = {
   membership_id: string;
@@ -18,16 +19,29 @@ type UserMembership = {
   has_store_discounts: boolean;
 };
 
+type ConfirmedMatch = {
+  id: string;
+  pet_image_url: string;
+  pet_name: string;
+  pet_species: string;
+  pet_breed: string;
+  pet_age: string;
+  my_pet_name: string;
+  my_pet_image_url: string;
+  my_pet_active: boolean;
+};
+
 export default function Profile() {
   const { user, signOut, loading } = useAuth();
   const [userMembership, setUserMembership] = useState<UserMembership | null>(null);
   const [loadingMembership, setLoadingMembership] = useState(true);
-  
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_700Bold,
   });
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -63,6 +77,85 @@ export default function Profile() {
     if (!error) {
       router.replace('/(auth)/login');
     }
+  };
+
+  const [showMatches, setShowMatches] = useState(false);
+  const [confirmedMatches, setConfirmedMatches] = useState<ConfirmedMatch[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+
+  useEffect(() => {
+    if (showMatches && user) {
+      fetchConfirmedMatches();
+    }
+  }, [showMatches, user]);
+
+  const fetchConfirmedMatches = async () => {
+    setLoadingMatches(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Debes iniciar sesión');
+      const { data: pets, error: petsError } = await supabase
+        .from('pets')
+        .select('id, name, image_url, is_active')
+        .eq('owner_id', session.user.id);
+      if (petsError) throw petsError;
+      if (!pets || pets.length === 0) {
+        setConfirmedMatches([]);
+        setLoadingMatches(false);
+        return;
+      }
+      const petIds = pets.map((p: any) => p.id);
+      const petsMap = new Map(pets.map((p: any) => [p.id, p]));
+      const { data, error } = await supabase
+        .from('pet_matches')
+        .select(`
+          *,
+          pet_1:pet_id_1(id, name, species, breed, age, image_url, owner_id),
+          pet_2:pet_id_2(id, name, species, breed, age, image_url, owner_id)
+        `)
+        .eq('match_status', 'matched')
+        .or(`pet_id_1.in.(${petIds.join(',')}),pet_id_2.in.(${petIds.join(',')})`);
+      if (error) throw error;
+      // Filtrar duplicados y asociar la mascota propia
+      const unique = new Map();
+      (data || []).forEach((m: any) => {
+        const ids = [m.pet_1?.id, m.pet_2?.id].sort().join('-');
+        if (!unique.has(ids)) {
+          let myPet, otherPet;
+          if (petIds.includes(m.pet_1?.id)) {
+            myPet = m.pet_1;
+            otherPet = m.pet_2;
+          } else {
+            myPet = m.pet_2;
+            otherPet = m.pet_1;
+          }
+          const myPetActive = petsMap.get(myPet?.id)?.is_active ?? true;
+          unique.set(ids, {
+            id: m.id,
+            pet_image_url: otherPet?.image_url || '',
+            pet_name: otherPet?.name || '',
+            pet_species: otherPet?.species || '',
+            pet_breed: otherPet?.breed || '',
+            pet_age: otherPet?.age || '',
+            my_pet_name: myPet?.name || '',
+            my_pet_image_url: myPet?.image_url || '',
+            my_pet_active: myPetActive,
+          });
+        }
+      });
+      setConfirmedMatches(Array.from(unique.values()));
+    } catch (e) {
+      setConfirmedMatches([]);
+    } finally {
+      setLoadingMatches(false);
+    }
+  };
+
+  const goToChat = (match: ConfirmedMatch) => {
+    setShowMatches(false);
+    setTimeout(() => {
+      router.push({ pathname: '/(app)/chat', params: { matchId: match.id } });
+    }, 200); // Pequeño delay para la animación del modal
   };
 
   if (loading || !fontsLoaded) {
@@ -141,18 +234,14 @@ export default function Profile() {
           <CreditCard size={24} color="#666" />
           <Text style={styles.menuText}>Membresía y Facturación</Text>
         </TouchableOpacity>
-        {userMembership?.has_coupons && (
-          <TouchableOpacity 
-            style={styles.menuItem}
-            onPress={() => router.push('/coupons')}
-          >
-            <Ticket size={24} color="#666" />
-            <Text style={styles.menuText}>Cupones de descuento</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.menuItem}>
+        {/* Mostrar siempre la opción Cupones de descuento en el menú del perfil */}
+        <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/coupons')}>
+          <Ticket size={24} color="#666" />
+          <Text style={styles.menuText}>Cupones de descuento</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.menuItem} onPress={() => setShowMatches(true)}>
           <Heart size={24} color="#666" />
-          <Text style={styles.menuText}>Mis Coincidencias</Text>
+          <Text style={styles.menuText}>Mis Matches</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.menuItem}>
           <MapPin size={24} color="#666" />
@@ -174,6 +263,56 @@ export default function Profile() {
           </>
         )}
       </TouchableOpacity>
+
+      {showMatches && (
+        <Modal
+          visible={showMatches}
+          animationType="slide"
+          onRequestClose={() => setShowMatches(false)}
+          transparent={true}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.sectionTitle}>Mis Matches Confirmados</Text>
+              {loadingMatches ? (
+                <ActivityIndicator size="large" color="#ffbc4c" />
+              ) : confirmedMatches.length === 0 ? (
+                <Text style={styles.emptyText}>No tienes matches confirmados aún.</Text>
+              ) : (
+                <ScrollView style={{maxHeight: 400}}>
+                  {confirmedMatches.map((match: ConfirmedMatch) => (
+                    <View style={styles.matchCard} key={match.id}>
+                      <Image source={{ uri: match.pet_image_url }} style={styles.matchImage} />
+                      <View style={{flex:1, marginLeft:12}}>
+                        <Text style={styles.matchName}>{match.pet_name}</Text>
+                        <Text style={styles.matchBreed}>
+                          {match.pet_species} {match.pet_breed ? `• ${match.pet_breed}` : ''} {match.pet_age ? `• ${match.pet_age}` : ''}
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                          <Image source={{ uri: match.my_pet_image_url }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8, backgroundColor: '#eee' }} />
+                          <Text style={{ fontSize: 13, color: '#888', fontFamily: 'Inter_500Medium' }}>Con tu mascota: <Text style={{ color: '#333', fontFamily: 'Inter_700Bold' }}>{match.my_pet_name}</Text></Text>
+                        </View>
+                        {match.my_pet_active ? (
+                          <TouchableOpacity style={styles.chatButton} onPress={() => goToChat(match)}>
+                            <Text style={styles.chatButtonText}>Abrir chat</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={[styles.chatButton, { backgroundColor: '#ccc' }]}> 
+                            <Text style={[styles.chatButtonText, { color: '#888' }]}>Mascota inactiva</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+              <TouchableOpacity style={styles.closeButton} onPress={() => setShowMatches(false)}>
+                <Text style={styles.closeButtonText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -323,5 +462,80 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
     color: '#ffbc4c',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  matchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    width: 300,
+  },
+  matchImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#eee',
+  },
+  matchName: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#333',
+  },
+  matchBreed: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  chatButton: {
+    marginTop: 10,
+    backgroundColor: '#ffbc4c',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-start',
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+  },
+  closeButton: {
+    marginTop: 20,
+    backgroundColor: '#eee',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  closeButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+    padding: 20,
   },
 });

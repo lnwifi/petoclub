@@ -11,6 +11,20 @@ import { CartProvider } from '@/lib/cart-context';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { configureWooCommerceWebhook } from '@/app/api/webhooks';
 import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
+
+const linking = {
+  prefixes: [
+    'petoclub://',
+    'https://app.petoclub.com.ar',
+    'https://www.app.petoclub.com.ar',
+  ],
+  config: {
+    screens: {
+      membershipsSuccess: 'memberships-success',
+    },
+  },
+};
 
 export default function AppLayout() {
   const { user } = useAuth();
@@ -85,10 +99,10 @@ export default function AppLayout() {
             headerTitle: `¡Hola, ${firstName}!`,
             tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
             headerLeft: () => (
-              <View style={{ paddingLeft: 16 }}>
+              <View style={{ marginLeft: 10, flex: 1, justifyContent: 'center' }}>
                 <Image
-                  source={require('@/assets/images/petclub-logo.svg')}
-                  style={{ width: 100, height: 30 }}
+                  source={require('@/assets/images/logo.png')}
+                  style={{ width: 120, height: 40 }}
                   resizeMode="contain"
                 />
               </View>
@@ -113,10 +127,24 @@ export default function AppLayout() {
           }}
         />
         <Tabs.Screen
-          name="store"
+          name="places/[id]"
           options={{
-            title: 'Tienda',
-            tabBarIcon: ({ color, size }) => <Ionicons name="cart" size={size} color={color} />,
+            href: null, // Oculta la ruta dinámica del TabBar
+            title: 'Detalles',
+          }}
+        />
+        <Tabs.Screen
+          name="red-de-ayuda"
+          options={{
+            title: 'Red de Ayuda',
+            tabBarIcon: ({ color, size }) => <Ionicons name="megaphone" size={size} color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="red-de-ayuda/[id]"
+          options={{
+            href: null, // Oculta la ruta dinámica del detalle del aviso del TabBar
+            title: 'Detalle Aviso',
           }}
         />
         <Tabs.Screen
@@ -124,6 +152,21 @@ export default function AppLayout() {
           options={{
             title: 'Refugios',
             tabBarIcon: ({ color, size }) => <Ionicons name="paw" size={size} color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="eventos"
+          options={{
+            href: null, // Esto oculta la pestaña del menú
+            title: 'Eventos',
+            tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="store"
+          options={{
+            title: 'Tienda',
+            tabBarIcon: ({ color, size }) => <Ionicons name="cart" size={size} color={color} />,
           }}
         />
         <Tabs.Screen
@@ -158,22 +201,6 @@ export default function AppLayout() {
           }}
         />
         <Tabs.Screen
-          name="webview"
-          options={{
-            title: 'Navegador',
-            headerShown: false,
-            href: null,
-          }}
-        />
-        <Tabs.Screen
-          name="checkout"
-          options={{
-            title: 'Checkout',
-            headerShown: true,
-            href: null,
-          }}
-        />
-        <Tabs.Screen
           name="profile/orders"
           options={{
             title: 'Mis Pedidos',
@@ -189,6 +216,26 @@ export default function AppLayout() {
             href: null,
           }}
         />
+        <Tabs.Screen
+          name="memberships-success"
+          options={{
+            title: 'Pago Exitoso',
+            headerShown: true,
+            href: null, // Oculta del menú inferior y navegación pública
+          }}
+        />
+        {/* Oculta rutas no deseadas del menú inferior */}
+        <Tabs.Screen name="cart" options={{ href: null }} />
+        <Tabs.Screen name="storeWebview" options={{ href: null }} />
+        <Tabs.Screen name="productDetail" options={{ href: null }} />
+        <Tabs.Screen name="webview" options={{ href: null }} />
+        <Tabs.Screen name="checkout" options={{ href: null }} />
+        <Tabs.Screen name="checkoutWebview" options={{ href: null }} />
+        {/* Oculta rutas de payment y estados del menú inferior */}
+        <Tabs.Screen name="payment" options={{ href: null }} />
+        <Tabs.Screen name="payment/success" options={{ href: null }} />
+        <Tabs.Screen name="payment/failure" options={{ href: null }} />
+        <Tabs.Screen name="payment/pending" options={{ href: null }} />
       </Tabs>
       <FloatingCart />
     </AuthRoute>

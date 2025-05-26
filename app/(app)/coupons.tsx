@@ -1,11 +1,12 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth } from '../../lib/auth-context';
 import { Ticket, Copy, Check } from 'lucide-react-native';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Stack, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import CouponUpgradeModal from '../components/CouponUpgradeModal';
 
 // Definir tipos
 type Coupon = {
@@ -30,6 +31,8 @@ export default function CouponsScreen() {
   const [userMembership, setUserMembership] = useState<UserMembership | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [redeemedCodes, setRedeemedCodes] = useState<{ [couponId: string]: { code: string, redeemed_at: string, expires_at: string, is_expired: boolean } }>({});
+  const [isCouponUpgradeModalVisible, setCouponUpgradeModalVisible] = useState(false);
   const { session } = useAuth();
   const router = useRouter();
 
@@ -65,19 +68,17 @@ export default function CouponsScreen() {
           has_coupons: userMembershipData[0].has_coupons
         });
 
-        // Si el usuario tiene acceso a cupones, cargarlos
-        if (userMembershipData[0].has_coupons) {
-          const { data: couponsData, error: couponsError } = await supabase
-            .rpc('get_available_coupons', { user_id: session?.user.id });
+        // Cargar cupones para todos los usuarios
+        const { data: couponsData, error: couponsError } = await supabase
+          .rpc('get_available_coupons', { user_id: session?.user.id });
 
-          if (couponsError) {
-            console.error('Error al cargar cupones:', couponsError);
-            Alert.alert('Error', 'No se pudieron cargar los cupones disponibles');
-            return;
-          }
-
-          setCoupons(couponsData || []);
+        if (couponsError) {
+          console.error('Error al cargar cupones:', couponsError);
+          Alert.alert('Error', 'No se pudieron cargar los cupones disponibles');
+          return;
         }
+
+        setCoupons(couponsData || []);
       } else {
         setUserMembership(null);
       }
@@ -100,6 +101,62 @@ export default function CouponsScreen() {
     }
   };
 
+  // Handler para canjear desde Supabase
+  const handleRedeem = async (couponId: string) => {
+    if (!session?.user?.id) {
+      Alert.alert('Debes iniciar sesión para canjear cupones');
+      return;
+    }
+    // Verificar membresía premium antes de canjear
+    if (!userMembership || userMembership.membership_name.toLowerCase() !== 'premium') {
+      setCouponUpgradeModalVisible(true);
+      return;
+    }
+    const { data, error } = await supabase.rpc('redeem_coupon', {
+      p_user_id: session.user.id,
+      p_coupon_id: couponId,
+    });
+    if (error) {
+      Alert.alert('Error', error.message || 'No se pudo canjear el cupón');
+      return;
+    }
+    if (data && data.length > 0) {
+      const { code, redeemed_at, expires_at, is_expired } = data[0];
+      setRedeemedCodes(prev => ({ ...prev, [couponId]: { code, redeemed_at, expires_at, is_expired } }));
+      if (is_expired) {
+        Alert.alert('Cupón caducado', `Tu código (${code}) ha expirado.`);
+      } else {
+        Alert.alert('¡Cupón canjeado!', `Tu código es: ${code}\nVálido hasta: ${new Date(expires_at).toLocaleTimeString()}`);
+      }
+    } else {
+      Alert.alert('Error', 'No se pudo canjear el cupón.');
+    }
+  };
+
+  // Al cargar la pantalla, consulta los canjes del usuario para mostrar el estado
+  useEffect(() => {
+    const fetchRedemptions = async () => {
+      if (!session?.user?.id) return;
+      const { data, error } = await supabase
+        .from('user_coupons')
+        .select('coupon_id, code, redeemed_at, expires_at, is_expired')
+        .eq('user_id', session.user.id);
+      if (!error && data) {
+        const map = {};
+        data.forEach((row: any) => {
+          map[row.coupon_id] = {
+            code: row.code,
+            redeemed_at: row.redeemed_at,
+            expires_at: row.expires_at,
+            is_expired: row.is_expired,
+          };
+        });
+        setRedeemedCodes(map);
+      }
+    };
+    fetchRedemptions();
+  }, [session]);
+
   if (!fontsLoaded) {
     return null;
   }
@@ -116,29 +173,9 @@ export default function CouponsScreen() {
         
         {loading ? (
           <Text style={styles.loadingText}>Cargando cupones...</Text>
-        ) : !userMembership?.has_coupons ? (
-          <View style={styles.upgradeContainer}>
-            <Text style={styles.upgradeTitle}>Acceso exclusivo para miembros Premium</Text>
-            <Text style={styles.upgradeDescription}>
-              Actualiza tu membresía a Premium para acceder a cupones de descuento exclusivos en servicios y productos para tu mascota.
-            </Text>
-            <TouchableOpacity 
-              style={styles.upgradeButton}
-              onPress={() => router.push('/memberships')}
-            >
-              <Text style={styles.upgradeButtonText}>Actualizar a Premium</Text>
-            </TouchableOpacity>
-          </View>
-        ) : coupons.length === 0 ? (
-          <View style={styles.emptyCouponsContainer}>
-            <Text style={styles.emptyCouponsTitle}>No hay cupones disponibles</Text>
-            <Text style={styles.emptyCouponsDescription}>
-              Actualmente no hay cupones disponibles. Vuelve a revisar más tarde para encontrar nuevas ofertas.
-            </Text>
-          </View>
         ) : (
           <View style={styles.couponsContainer}>
-            {coupons.map(coupon => (
+            {coupons.map((coupon) => (
               <View key={coupon.id} style={styles.couponCard}>
                 <View style={styles.couponHeader}>
                   <Text style={styles.couponTitle}>{coupon.title}</Text>
@@ -159,20 +196,28 @@ export default function CouponsScreen() {
                   )}
                 </View>
                 
-                <View style={styles.codeContainer}>
-                  <Text style={styles.codeLabel}>Código:</Text>
-                  <Text style={styles.codeText}>{coupon.code}</Text>
-                  <TouchableOpacity 
-                    style={styles.copyButton}
-                    onPress={() => copyToClipboard(coupon.code)}
-                  >
-                    {copiedCode === coupon.code ? (
-                      <Check size={18} color="#4CAF50" />
-                    ) : (
-                      <Copy size={18} color="#666" />
-                    )}
-                  </TouchableOpacity>
-                </View>
+                {/* Solo mostrar el botón "Canjear" si el cupón NO fue canjeado */}
+                {!redeemedCodes[coupon.id] && (
+                  <View style={{ alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
+                    <TouchableOpacity
+                      style={styles.upgradeButton}
+                      onPress={() => handleRedeem(coupon.id)}
+                    >
+                      <Text style={styles.upgradeButtonText}>Canjear</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {/* Mostrar el código solo si ya fue canjeado */}
+                {redeemedCodes[coupon.id] && (
+                  <View style={{ alignItems: 'center', marginTop: 12 }}>
+                    <Text style={{ color: '#ffbc4c', fontWeight: 'bold', fontSize: 18 }}>{redeemedCodes[coupon.id].code}</Text>
+                    <Text style={{ color: '#666', fontSize: 13 }}>
+                      {redeemedCodes[coupon.id].is_expired
+                        ? 'Este código ha caducado.'
+                        : `Válido hasta: ${new Date(redeemedCodes[coupon.id].expires_at).toLocaleTimeString()}`}
+                    </Text>
+                  </View>
+                )}
                 
                 {coupon.valid_until && (
                   <Text style={styles.validUntil}>
@@ -184,6 +229,14 @@ export default function CouponsScreen() {
           </View>
         )}
       </ScrollView>
+      <CouponUpgradeModal
+        visible={isCouponUpgradeModalVisible}
+        onClose={() => setCouponUpgradeModalVisible(false)}
+        onUpgrade={() => {
+          setCouponUpgradeModalVisible(false);
+          router.push('/memberships');
+        }}
+      />
     </View>
   );
 }
@@ -317,28 +370,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
     color: '#333',
-  },
-  codeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  codeLabel: {
-    fontFamily: 'Inter_500Medium',
-    color: '#666',
-    marginRight: 8,
-  },
-  codeText: {
-    flex: 1,
-    fontFamily: 'Inter_700Bold',
-    color: '#ffbc4c',
-    fontSize: 16,
-  },
-  copyButton: {
-    padding: 8,
   },
   validUntil: {
     fontFamily: 'Inter_400Regular',

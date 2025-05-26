@@ -12,6 +12,7 @@ module.exports = function(api) {
           'process': 'process/browser',
           'util': 'util',
           'string_decoder': 'string_decoder',
+          'react-native-maps': '@teovilla/react-native-web-maps',
         }
       }]
     ]

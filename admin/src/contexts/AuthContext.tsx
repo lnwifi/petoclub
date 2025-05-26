@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  restoring: boolean;
   error: string | null;
   supabase: any;
   signIn: (email: string, password: string) => Promise<void>;
@@ -14,6 +15,8 @@ interface AuthContextType {
   checkSession: () => Promise<void>;
   isSigningIn: boolean;
   isSigningOut: boolean;
+  restoreFailed: boolean;
+  retryRestore: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,10 +32,12 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [restoreFailed, setRestoreFailed] = useState(false);
 
   // Function to verify admin status
   const verifyAdminStatus = useCallback(async (userId: string) => {
@@ -40,20 +45,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('is_admin')
-        .eq('id', userId)
+        .eq('user_id', userId)
         .single();
 
       if (profileError) {
-        console.error('Error verifying admin status:', profileError);
+        setIsAdmin(false);
+        setUser(null);
+        await supabase.auth.signOut();
         return false;
       }
 
-      return profile?.is_admin || false;
+      if (!profile?.is_admin) {
+        setIsAdmin(false);
+        setUser(null);
+        await supabase.auth.signOut();
+        return false;
+      }
+
+      setIsAdmin(true);
+      return true;
     } catch (error) {
-      console.error('Error in verifyAdminStatus:', error);
+      setIsAdmin(false);
+      setUser(null);
+      await supabase.auth.signOut();
       return false;
     }
-  }, []);
+  }, [supabase]);
 
   // Function to check session
   const checkSession = useCallback(async () => {
@@ -74,28 +91,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setIsAdmin(false);
         setLoading(false);
+        console.log('checkSession: set loading false, user: null, isAdmin: false');
         return;
       }
 
       setUser(session.user);
+      console.log('checkSession: set user:', session.user);
       
       // Verify admin status
+      let isAdminStatus = false;
       if (session.user) {
-        const isAdminStatus = await verifyAdminStatus(session.user.id);
+        isAdminStatus = await verifyAdminStatus(session.user.id);
         setIsAdmin(isAdminStatus);
+        console.log('checkSession: set isAdmin:', isAdminStatus);
+      } else {
+        setIsAdmin(false);
+        console.log('checkSession: set isAdmin: false');
       }
-
       setLoading(false);
-      
+      console.log('checkSession: set loading false, user:', session.user, 'isAdmin:', isAdminStatus);
     } catch (error) {
       console.error('Error in checkSession:', error);
       setError(error instanceof Error ? error.message : 'Error verifying session');
-      
       // Clear session on error
       await supabase.auth.signOut();
       setUser(null);
       setIsAdmin(false);
       setLoading(false);
+      console.log('checkSession: set loading false, user: null, isAdmin: false (error)');
     }
   }, [verifyAdminStatus]);
 
@@ -115,34 +138,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
 
+      // Forzar actualización del estado de sesión
+      await checkSession();
+
       if (data?.user) {
         const isAdminStatus = await verifyAdminStatus(data.user.id);
         setIsAdmin(isAdminStatus);
+        console.log('signIn: set isAdmin:', isAdminStatus);
       }
-
     } catch (error) {
       console.error('Error in signIn:', error);
       setError(error instanceof Error ? error.message : 'Error signing in');
     } finally {
       setIsSigningIn(false);
     }
-  }, [verifyAdminStatus]);
+  }, [verifyAdminStatus, checkSession]);
 
   // Sign out function
   const signOut = useCallback(async () => {
     setIsSigningOut(true);
     setError(null);
-    
     try {
       const { error } = await supabase.auth.signOut();
-      
       if (error) {
         console.error('Error signing out:', error);
         throw error;
       }
-
+      // Fallback manual cleanup (por si el SDK falla)
+      try {
+        localStorage.removeItem('supabase.auth.token');
+        localStorage.removeItem('supabase.auth.refresh_token');
+        localStorage.removeItem('supabase.auth.access_token');
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith('sb-')) localStorage.removeItem(k);
+        });
+        // Limpiar IndexedDB: supabase usa localforage, clave 'supabase-' o 'localforage'
+        if ('indexedDB' in window) {
+          const req1 = window.indexedDB.deleteDatabase('supabase-auth-client');
+          req1.onerror = () => console.warn('No se pudo borrar indexedDB: supabase-auth-client');
+          req1.onsuccess = () => console.log('IndexedDB supabase-auth-client borrada');
+          // Algunas versiones usan 'localforage' como nombre
+          const req2 = window.indexedDB.deleteDatabase('localforage');
+          req2.onerror = () => {};
+          req2.onsuccess = () => {};
+        }
+      } catch (e) {
+        console.warn('No se pudo limpiar localStorage/IndexedDB manualmente:', e);
+      }
       setUser(null);
       setIsAdmin(false);
+      console.log('signOut: set user: null, isAdmin: false');
     } catch (error) {
       console.error('Error in signOut:', error);
       setError(error instanceof Error ? error.message : 'Error signing out');
@@ -156,48 +201,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
   }, []);
 
-  // Effect to check session on mount
-  useEffect(() => {
-    checkSession();
+  // Nueva función para reintentar restauración
+  const retryRestore = useCallback(async () => {
+    setRestoreFailed(false);
+    setRestoring(true);
+    await checkSession();
+    setRestoring(false);
+  }, [checkSession]);
 
-    // Subscribe to session changes
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    let finished = false;
+    setRestoring(true);
+    setRestoreFailed(false);
+
+    // Timeout fallback
+    timeout = setTimeout(() => {
+      if (!finished) {
+        setRestoreFailed(true);
+        setRestoring(false);
+      }
+    }, 5000);
+
+    // Subscribe to session changes (will fire immediately with current session)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      console.log('Authentication state change detected');
-      setLoading(true);
-      
-      if (!session) {
-        console.log('No active session');
+      if (finished) return;
+      if (session && session.user) {
+        setUser(session.user);
+        const isAdminStatus = await verifyAdminStatus(session.user.id);
+        setIsAdmin(isAdminStatus);
+        setRestoring(false);
+        setRestoreFailed(false);
+        finished = true;
+        clearTimeout(timeout);
+      } else {
         setUser(null);
         setIsAdmin(false);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        console.log('Active session, updating user');
-        setUser(session.user);
-        
-        if (session.user) {
-          const isAdminStatus = await verifyAdminStatus(session.user.id);
-          setIsAdmin(isAdminStatus);
-        }
-      } catch (error) {
-        console.error('Error processing authentication change:', error);
-        setIsAdmin(false);
-      } finally {
-        console.log('Finished processing authentication change');
-        setLoading(false);
+        // No llamamos a setRestoring(false) aquí porque podría recuperarse luego
       }
     });
 
     return () => {
+      finished = true;
+      clearTimeout(timeout);
       subscription.unsubscribe();
     };
-  }, [checkSession, verifyAdminStatus]);
+  }, [verifyAdminStatus]);
 
   const value = useMemo(() => ({
     user,
     loading,
+    restoring,
     error,
     supabase,
     signIn,
@@ -206,10 +260,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetError,
     checkSession,
     isSigningIn,
-    isSigningOut
+    isSigningOut,
+    restoreFailed,
+    retryRestore
   }), [
     user,
     loading,
+    restoring,
     error,
     signIn,
     signOut,
@@ -217,7 +274,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetError,
     checkSession,
     isSigningIn,
-    isSigningOut
+    isSigningOut,
+    restoreFailed,
+    retryRestore
   ]);
 
   return (

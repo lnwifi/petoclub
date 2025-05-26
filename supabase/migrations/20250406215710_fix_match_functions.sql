@@ -19,7 +19,7 @@ DECLARE
     user_owner_id UUID;
     user_species TEXT;
 BEGIN
-    -- Obtener el ID del dueño y los detalles de la mascota seleccionada
+    -- Obtener el ID del dueño y la especie de la mascota seleccionada
     SELECT p.owner_id, p.species INTO user_owner_id, user_species 
     FROM public.pets p
     WHERE p.id = user_pet_id;
@@ -29,53 +29,33 @@ BEGIN
         RAISE EXCEPTION 'Mascota no encontrada o no pertenece a un usuario válido';
     END IF;
     
-    -- Log de depuración
-    RAISE NOTICE 'Buscando matches para mascota: %, especie: %, dueño: %', 
-        user_pet_id, user_species, user_owner_id;
-    
-    -- Verificar cuántas mascotas hay en total
-    RAISE NOTICE 'Total de mascotas en la base de datos: %', 
-        (SELECT COUNT(*) FROM public.pets);
-    
-    -- Verificar cuántas mascotas hay de la misma especie
-    RAISE NOTICE 'Mascotas de la misma especie: %', 
-        (SELECT COUNT(*) FROM public.pets WHERE species = user_species);
-    
-    -- Verificar cuántas mascotas no son del mismo dueño
-    RAISE NOTICE 'Mascotas de la misma especie y diferente dueño: %', 
-        (SELECT COUNT(*) FROM public.pets 
-         WHERE species = user_species AND owner_id <> user_owner_id);
-    
-    -- Verificar si hay matches previos
-    RAISE NOTICE 'Matches previos encontrados: %', 
-        (SELECT COUNT(*) FROM public.pet_matches 
-         WHERE pet_id_1 = user_pet_id OR pet_id_2 = user_pet_id);
-    
     RETURN QUERY
     SELECT 
-        p.id AS id,
-        p.name AS name,
-        p.species AS species,
-        p.breed AS breed,
-        p.age AS age,
-        p.description AS description,
-        p.image_url AS image_url,
-        p.owner_id AS owner_id
+        p.id,
+        p.name,
+        p.species,
+        p.breed,
+        p.age,
+        p.description,
+        p.image_url,
+        p.owner_id
     FROM public.pets p
     WHERE 
-        -- No es la misma mascota
-        p.id <> user_pet_id
-        -- No pertenece al mismo dueño
+        p.species = user_species
+        AND p.id <> user_pet_id
         AND p.owner_id <> user_owner_id
-        -- Misma especie que la mascota seleccionada
-        AND p.species = user_species
+        AND p.owner_id IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 
+            FROM public.pet_matches m
+            WHERE (m.pet_id_1 = user_pet_id AND m.pet_id_2 = p.id)
+               OR (m.pet_id_1 = p.id AND m.pet_id_2 = user_pet_id)
+        )
     ORDER BY 
-        -- Priorizar mascotas con fotos
         CASE WHEN p.image_url IS NOT NULL THEN 0 ELSE 1 END,
-        -- Luego ordenar por fecha de creación (más recientes primero)
         p.created_at DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION public.get_pending_matches(user_pet_id UUID)
 RETURNS TABLE (

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "bolt-expo-nativewind",
+    "name": "PetoClub",
     "slug": "bolt-expo-nativewind",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -30,9 +30,23 @@
         }
       }
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      "expo-barcode-scanner"
+    ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "2c4e536b-1b0e-48ea-86b5-7c92037a5a4f"
+      }
+    },
+    "android": {
+      "package": "com.petoclub.boltexponativewind"
     }
   }
 }

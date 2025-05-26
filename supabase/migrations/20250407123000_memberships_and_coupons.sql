@@ -254,34 +254,23 @@ RETURNS TABLE (
     valid_until TIMESTAMP WITH TIME ZONE,
     partner_name TEXT
 ) AS $$
-DECLARE
-    has_premium_access BOOLEAN;
 BEGIN
-    -- Verificar si el usuario tiene acceso premium a cupones
-    SELECT mt.has_coupons INTO has_premium_access
-    FROM public.user_memberships um
-    JOIN public.membership_types mt ON um.membership_type_id = mt.id
-    WHERE um.user_id = get_available_coupons.user_id
-    AND um.is_active = TRUE;
-    
-    IF has_premium_access = TRUE THEN
-        RETURN QUERY
-        SELECT 
-            c.id,
-            c.title,
-            c.description,
-            c.code,
-            c.discount_percentage,
-            c.discount_amount,
-            c.valid_from,
-            c.valid_until,
-            c.partner_name
-        FROM public.discount_coupons c
-        WHERE c.valid_from <= now()
-        AND (c.valid_until IS NULL OR c.valid_until >= now())
-        AND c.is_active = TRUE
-        ORDER BY c.created_at DESC;
-    END IF;
+    RETURN QUERY
+    SELECT 
+        c.id,
+        c.title,
+        c.description,
+        c.code,
+        c.discount_percentage,
+        c.discount_amount,
+        c.valid_from,
+        c.valid_until,
+        c.partner_name
+    FROM public.discount_coupons c
+    WHERE c.valid_from <= now()
+    AND (c.valid_until IS NULL OR c.valid_until >= now())
+    AND c.is_active = TRUE
+    ORDER BY c.created_at DESC;
 END;
 $$ LANGUAGE plpgsql;
 

@@ -15,12 +15,15 @@ import {
 import { X, Camera, Upload, Plus } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
-import { uploadImage } from '@/utils/imageUpload';
+import { uploadImage, deleteImageByPublicUrl } from '@/utils/imageUpload';
+import { useMembership } from '../hooks/useMembership';
 
 type AddPetModalProps = {
   visible: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  onAddPet?: (petData: any) => Promise<void>;
+  maxImages?: number;
 };
 
 type PetData = {
@@ -30,7 +33,19 @@ type PetData = {
   age: string;
   description: string;
   image_url?: string;
+  interest?: string[];
 };
+
+const BASE_INTERESES = [
+  'Jugar',
+  'Pasear',
+  'Dormir',
+  'Comer',
+  'Correr',
+  'Socializar',
+  'Aprender trucos',
+  'Nadar',
+];
 
 export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModalProps) {
   const [petData, setPetData] = useState<PetData>({
@@ -40,15 +55,23 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
     age: '',
     description: '',
   });
-  const [image, setImage] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+const [interest, setIntereses] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  const { membership } = useMembership();
+  const maxImages = membership?.max_photos_per_pet || 1; // Default to 1 if no membership
 
   const handleChange = (field: keyof PetData, value: string) => {
     setPetData({ ...petData, [field]: value });
   };
 
   const pickImage = async () => {
+    if (images.length >= maxImages) {
+      Alert.alert('Límite de imágenes', `Solo puedes subir hasta ${maxImages} imágenes para tu mascota.`);
+      return;
+    }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -58,7 +81,7 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImage(result.assets[0].uri);
+        setImages([...images, result.assets[0].uri]);
       }
     } catch (error) {
       console.error('Error al seleccionar imagen:', error);
@@ -67,6 +90,10 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
   };
 
   const takePhoto = async () => {
+    if (images.length >= maxImages) {
+      Alert.alert('Límite de imágenes', `Solo puedes subir hasta ${maxImages} imágenes para tu mascota.`);
+      return;
+    }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     
     if (status !== 'granted') {
@@ -81,7 +108,20 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setImage(result.assets[0].uri);
+      setImages([...images, result.assets[0].uri]);
+    }
+  };
+
+  const removeImage = async (idx: number) => {
+    const imageToRemove = images[idx];
+    setImages(images.filter((_, index) => index !== idx));
+    // Eliminar del bucket si es una URL pública (no local)
+    if (imageToRemove && imageToRemove.startsWith('http')) {
+      try {
+        await deleteImageByPublicUrl(imageToRemove);
+      } catch (err) {
+        console.error('Error al eliminar la imagen del bucket:', err);
+      }
     }
   };
 
@@ -114,7 +154,19 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
       
       console.log('Usuario autenticado:', session.user.email);
       
-      // Preparar datos para inserción (sin imagen primero)
+      // Subir imágenes y obtener URLs
+      let imageUrls: string[] = [];
+      if (images.length > 0) {
+        try {
+          imageUrls = await Promise.all(images.map(async (image) => {
+            return await uploadImage(image);
+          }));
+        } catch (err) {
+          throw new Error('Error al subir imágenes');
+        }
+      }
+
+      // Preparar datos para inserción
       const petRecord = {
         owner_id: session.user.id,
         name: petData.name.trim(),
@@ -122,40 +174,11 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
         breed: sanitizeField(petData.breed),
         age: sanitizeField(petData.age),
         description: sanitizeField(petData.description),
-        image_url: null as string | null, // Explicitly type as string | null
+        image_url: imageUrls[0] || null, // Principal image
+        images: imageUrls.length > 0 ? imageUrls : null, // All images
+        interest: interest,
       };
-      
-      // Si hay una imagen, intentar subirla primero antes de guardar los datos
-      if (image) {
-        try {
-          console.log('Procesando imagen...');
-          const imageUrl = await uploadImage(image, setUploadProgress);
-          
-          if (imageUrl) {
-            console.log('Imagen subida exitosamente:', imageUrl);
-            petRecord.image_url = imageUrl;
-          } else {
-            console.log('No se pudo subir la imagen, continuando sin imagen');
-            // Mostrar advertencia pero continuar
-            Alert.alert(
-              'Advertencia', 
-              'No se pudo subir la imagen. Los datos de tu mascota se guardarán sin imagen.',
-              [{ text: 'Continuar' }]
-            );
-          }
-        } catch (imageError: any) {
-          console.error('Error al procesar imagen:', imageError);
-          // Mostrar advertencia pero continuar
-          Alert.alert(
-            'Advertencia', 
-            'No se pudo subir la imagen. Los datos de tu mascota se guardarán sin imagen.',
-            [{ text: 'Continuar' }]
-          );
-        }
-      }
-      
-      console.log('Guardando datos en la base de datos...');
-      
+
       // Guardar los datos de la mascota en la base de datos
       const { error: insertError } = await supabase
         .from('pets')
@@ -176,26 +199,11 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
         age: '',
         description: '',
       });
-      setImage(null);
-
-      // Notificar éxito
-      if (petRecord.image_url) {
-        Alert.alert('¡Éxito!', 'Tu mascota ha sido agregada correctamente con su imagen');
-      } else {
-        Alert.alert('¡Éxito!', 'Tu mascota ha sido agregada correctamente, pero sin imagen');
-      }
-      
-      // Llamar al callback de éxito si existe
-      if (onSuccess) {
-        onSuccess();
-      }
-      
-      // Cerrar el modal
+      setImages([]);
+    setIntereses([]);
+      if (onSuccess) onSuccess();
       onClose();
     } catch (error: any) {
-      console.error('Error al guardar mascota:', error);
-      
-      // Mensajes específicos para errores comunes
       if (error.message.includes('autenticación') || error.message.includes('sesión') || error.message.includes('iniciar sesión')) {
         Alert.alert('Error de autenticación', error.message);
       } else if (error.message.includes('base de datos')) {
@@ -227,31 +235,131 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
           </View>
 
           <ScrollView style={styles.formContainer}>
-            {/* Sección de imagen */}
-            <View style={styles.imageSection}>
-              {image ? (
-                <View style={styles.imagePreviewContainer}>
-                  <Image source={{ uri: image }} style={styles.imagePreview} />
-                  <TouchableOpacity 
-                    style={styles.changeImageButton}
-                    onPress={pickImage}
+            {/* Galería de imágenes con reordenamiento y principal */}
+            <Text style={styles.label}>Fotos</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {images.map((img, idx) => (
+                <View key={idx} style={{ position: 'relative', marginRight: 8 }}>
+                  <Image
+                    source={{ uri: img }}
+                    style={{ width: 80, height: 80, borderRadius: 8, borderWidth: 1, borderColor: idx === 0 ? '#ffbc4c' : '#ddd' }}
+                  />
+                  {/* Botón para marcar como principal */}
+                  {idx !== 0 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        bottom: 2,
+                        left: 2,
+                        backgroundColor: '#ffbc4c',
+                        borderRadius: 10,
+                        paddingHorizontal: 4,
+                        paddingVertical: 2,
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        const [selected] = newImages.splice(idx, 1);
+                        setImages([selected, ...newImages]);
+                      }}
+                    >
+                      <Text style={{ color: '#222', fontWeight: 'bold', fontSize: 10 }}>Principal</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Botón para mover a la izquierda */}
+                  {idx > 0 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        left: 2,
+                        backgroundColor: '#eee',
+                        borderRadius: 10,
+                        width: 20,
+                        height: 20,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        [newImages[idx - 1], newImages[idx]] = [newImages[idx], newImages[idx - 1]];
+                        setImages(newImages);
+                      }}
+                    >
+                      <Text style={{ color: '#666', fontWeight: 'bold', fontSize: 14 }}>{'<'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Botón para mover a la derecha */}
+                  {idx < images.length - 1 && (
+                    <TouchableOpacity
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        right: 24,
+                        backgroundColor: '#eee',
+                        borderRadius: 10,
+                        width: 20,
+                        height: 20,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                      }}
+                      onPress={() => {
+                        const newImages = [...images];
+                        [newImages[idx + 1], newImages[idx]] = [newImages[idx], newImages[idx + 1]];
+                        setImages(newImages);
+                      }}
+                    >
+                      <Text style={{ color: '#666', fontWeight: 'bold', fontSize: 14 }}>{'>'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {/* Botón para eliminar imagen */}
+                  <TouchableOpacity
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      right: 2,
+                      backgroundColor: 'rgba(0,0,0,0.6)',
+                      borderRadius: 10,
+                      width: 20,
+                      height: 20,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 2,
+                    }}
+                    onPress={() => removeImage(idx)}
+                    disabled={loading}
                   >
-                    <Text style={styles.changeImageText}>Cambiar imagen</Text>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>×</Text>
                   </TouchableOpacity>
+                  {/* Indicador de principal */}
+                  {idx === 0 && (
+                    <View style={{ position: 'absolute', bottom: 2, right: 2, backgroundColor: '#ffbc4c', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: '#222', fontWeight: 'bold', fontSize: 10 }}>Principal</Text>
+                    </View>
+                  )}
                 </View>
-              ) : (
-                <View style={styles.imageOptions}>
-                  <TouchableOpacity style={styles.imageOptionButton} onPress={takePhoto}>
-                    <Camera size={24} color="#ffbc4c" />
-                    <Text style={styles.imageOptionText}>Tomar foto</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.imageOptionButton} onPress={pickImage}>
-                    <Upload size={24} color="#ffbc4c" />
-                    <Text style={styles.imageOptionText}>Subir imagen</Text>
-                  </TouchableOpacity>
-                </View>
+              ))}
+              {images.length < maxImages && (
+                <TouchableOpacity
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 8,
+                    backgroundColor: '#f3f3f3',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: '#ddd',
+                  }}
+                  onPress={pickImage}
+                  disabled={images.length >= maxImages || loading}
+                >
+                  <Text style={{ color: '#bbb', fontSize: 32 }}>+</Text>
+                </TouchableOpacity>
               )}
-            </View>
+            </ScrollView>
 
             {/* Formulario */}
             <View style={styles.inputGroup}>
@@ -266,12 +374,27 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Especie*</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Perro, Gato, etc."
-                value={petData.species}
-                onChangeText={(text) => handleChange('species', text)}
-              />
+              <View style={styles.speciesContainer}>
+                {['Perro', 'Gato', 'Otros'].map(option => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.speciesButton,
+                      petData.species === option && styles.speciesButtonSelected,
+                      loading && styles.disabledButton
+                    ]}
+                    onPress={() => handleChange('species', option)}
+                    disabled={loading}
+                  >
+                    <Text style={[
+                      styles.speciesButtonText,
+                      petData.species === option && styles.speciesButtonTextSelected
+                    ]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
@@ -305,6 +428,43 @@ export default function AddPetModal({ visible, onClose, onSuccess }: AddPetModal
                 multiline
                 numberOfLines={4}
               />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Intereses</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {BASE_INTERESES.map((interes) => {
+                  const isSelected = interest.includes(interes);
+                  const limite = maxImages > 3 ? 5 : 3;
+                  return (
+                    <TouchableOpacity
+                      key={interes}
+                      style={{
+                        backgroundColor: isSelected ? '#ffbc4c' : '#f5f5f5',
+                        borderRadius: 16,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        margin: 4,
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#ffbc4c' : '#ccc',
+                      }}
+                      onPress={() => {
+                        if (!isSelected && interest.length >= limite) {
+                          Alert.alert('Límite de intereses', `Solo puedes seleccionar hasta ${limite} intereses con tu membresía.`);
+                          return;
+                        }
+                        setIntereses((prev) =>
+                          isSelected
+                            ? prev.filter((i) => i !== interes)
+                            : [...prev, interes]
+                        );
+                      }}
+                    >
+                      <Text style={{ color: isSelected ? '#fff' : '#333' }}>{interes}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           </ScrollView>
 
@@ -374,45 +534,6 @@ const styles = StyleSheet.create({
   formContainer: {
     padding: 16,
   },
-  imageSection: {
-    marginBottom: 20,
-  },
-  imageOptions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginVertical: 20,
-  },
-  imageOptionButton: {
-    alignItems: 'center',
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    width: '45%',
-  },
-  imageOptionText: {
-    marginTop: 8,
-    color: '#666',
-    fontFamily: 'Inter_500Medium',
-  },
-  imagePreviewContainer: {
-    alignItems: 'center',
-  },
-  imagePreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  changeImageButton: {
-    padding: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-  },
-  changeImageText: {
-    color: '#666',
-    fontFamily: 'Inter_500Medium',
-  },
   inputGroup: {
     marginBottom: 16,
   },
@@ -431,6 +552,35 @@ const styles = StyleSheet.create({
   textArea: {
     height: 100,
     textAlignVertical: 'top',
+  },
+  speciesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  speciesButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  speciesButtonSelected: {
+    backgroundColor: '#ffbc4c',
+    borderColor: '#ffbc4c',
+  },
+  speciesButtonText: {
+    color: '#666',
+    fontWeight: '600',
+  },
+  speciesButtonTextSelected: {
+    color: '#222',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   saveButton: {
     backgroundColor: '#ffbc4c',

@@ -60,11 +60,10 @@ export const signIn = async (email: string, password: string) => {
 
     console.log('Respuesta de Supabase:', { data, error });
 
-    if (error) throw error;
+    if (error) return { data: null, error };
     return { data, error: null };
   } catch (error: any) {
     console.error('Error detallado:', error);
-    Alert.alert('Error', error.message);
     return { data: null, error };
   }
 };

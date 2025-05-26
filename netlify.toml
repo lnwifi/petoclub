@@ -1,0 +1,6 @@
+[build]
+  command = "npx expo export:web"
+  publish = "web-build"
+
+[dev]
+  command = "npx expo start --web"

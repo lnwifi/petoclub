@@ -1,0 +1,23 @@
+# Configuración para la función check-expired-memberships
+# Documentación: https://supabase.com/docs/guides/functions/schedule-functions
+
+# Configuración de la función
+verify_jwt: false  # No necesitamos verificar JWT para tareas programadas
+
+# Configuración de la tarea programada
+schedule:
+  # Se ejecuta al inicio de cada hora, todos los días
+  cron: "0 * * * *"
+  # Otras opciones útiles:
+  # "*/30 * * * *" - cada 30 minutos
+  # "0 */6 * * *" - cada 6 horas
+  # "0 0,12 * * *" - dos veces al día (medianoche y mediodía)
+
+# Configuración de recursos
+resources:
+  memory: 512  # MB de memoria asignada
+  timeout: 300  # segundos (5 minutos)
+
+# Variables de entorno (opcionales)
+# env:
+#   MI_VARIABLE: valor

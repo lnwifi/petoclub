@@ -1,5 +1,5 @@
-// Inicializar cliente de Supabase
-const supabase = supabase.createClient(
+// Inicializar cliente de Supabase desde CDN
+const supabase = window.supabase.createClient(
     petoClubAuth.supabaseUrl,
     petoClubAuth.supabaseAnonKey
 );

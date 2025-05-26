@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.pets (
     age TEXT,
     description TEXT,
     image_url TEXT,
+    intereses TEXT[],
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL
 );

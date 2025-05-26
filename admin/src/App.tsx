@@ -14,26 +14,17 @@ import Eventos from './pages/Eventos';
 import Estadisticas from './pages/Estadisticas';
 import Configuracion from './pages/Configuracion';
 import NotFound from './pages/NotFound';
+import Locales from './pages/Locales'; // Agrego la importación del componente Locales
 
 // Componente para rutas protegidas
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading, error, isAdmin } = useAuth();
-  const [redirected, setRedirected] = useState(false);
-  
+  const { user, isAdmin, restoring, restoreFailed, retryRestore } = useAuth();
+
   useEffect(() => {
-    console.log('Estado ProtectedRoute:', { user, loading, error, isAdmin });
-  }, [user, loading, error, isAdmin]);
+    console.log('Estado ProtectedRoute:', { user, isAdmin, restoring, restoreFailed });
+  }, [user, isAdmin, restoring, restoreFailed]);
 
-  // Si hay un error, redirigir al login
-  if (error && !redirected) {
-    console.error('Error:', error);
-    setRedirected(true);
-    return <Navigate to="/login" replace />;
-  }
-
-  // Si está cargando, mostrar spinner
-  if (loading) {
-    console.log('Estado: Cargando...');
+  if (restoring) {
     return (
       <div style={{
         display: 'flex',
@@ -47,7 +38,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
           alignItems: 'center',
           gap: '1rem'
         }}>
-          <div>Cargando...</div>
+          <div>Restaurando sesión...</div>
           <div className="loader"></div>
           <style>
             {`
@@ -70,10 +61,39 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  // Si no hay sesión o no es admin, redirigir al login
-  if ((!user || !isAdmin) && !redirected) {
-    console.log('No hay sesión o no es admin, redirigiendo a login');
-    setRedirected(true);
+  if (restoreFailed) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh'
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '1rem',
+          color: '#c00'
+        }}>
+          <div>No se pudo restaurar la sesión.</div>
+          <button onClick={retryRestore} style={{
+            padding: '0.5rem 1.5rem',
+            background: '#3498db',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '1rem'
+          }}>
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || !isAdmin) {
     return <Navigate to="/login" replace />;
   }
 
@@ -103,6 +123,7 @@ const router = createBrowserRouter([
       { path: 'eventos', element: <Eventos /> },
       { path: 'estadisticas', element: <Estadisticas /> },
       { path: 'configuracion', element: <Configuracion /> },
+      { path: 'locales', element: <Locales /> }, // Agrego la ruta '/locales'
       { path: '*', element: <NotFound /> },
     ],
   },

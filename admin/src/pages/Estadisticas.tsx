@@ -176,10 +176,19 @@ export default function Estadisticas() {
           .from('profiles')
           .select('*', { count: 'exact', head: true });
 
-        const { count: activeUsers } = await supabase
+        // Validar existencia del campo antes de filtrar
+        let activeUsers = 0;
+        const { data: columnsData } = await supabase
           .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .gte('last_sign_in_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+          .select('last_sign_in_at')
+          .limit(1);
+        if (columnsData && columnsData.length && columnsData[0].last_sign_in_at !== undefined) {
+          const res = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .gte('last_sign_in_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+          activeUsers = res.count || 0;
+        }
 
         const { count: newUsers } = await supabase
           .from('profiles')

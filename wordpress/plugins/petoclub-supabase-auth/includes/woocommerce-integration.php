@@ -11,15 +11,90 @@ if (!defined('ABSPATH')) {
 // Incluir la clase de MercadoPago
 require_once plugin_dir_path(__FILE__) . 'mercadopago-sdk.php';
 
-// Iniciar sesión de PHP si no está iniciada
-if (!session_id()) {
-    session_start();
-}
+// Iniciar sesión de PHP correctamente en el hook init
+add_action('init', function() {
+    if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+        session_start();
+    }
+}, 1);
 
 // Agregar hooks para WooCommerce
 add_action('template_redirect', 'petoclub_check_checkout_auth');
 add_action('woocommerce_before_checkout_form', 'petoclub_verify_supabase_session');
 add_action('woocommerce_checkout_order_processed', 'petoclub_handle_order_processed', 10, 3);
+
+// WooCommerce hooks para sincronizar el carrito con Supabase
+// - Al iniciar sesión, recupera carrito de Supabase y lo llena en WooCommerce
+// - Al modificar el carrito, lo guarda en Supabase
+add_action('wp_login', 'petoclub_sync_cart_from_supabase_on_login', 20, 2);
+function petoclub_sync_cart_from_supabase_on_login($user_login, $user) {
+    if (!$user || !is_a($user, 'WP_User')) return;
+    $supabase_url = defined('PETOCLUB_SUPABASE_URL') ? PETOCLUB_SUPABASE_URL : '';
+    $supabase_anon_key = defined('PETOCLUB_SUPABASE_ANON_KEY') ? PETOCLUB_SUPABASE_ANON_KEY : '';
+    if (!$supabase_url || !$supabase_anon_key) return;
+    $email = $user->user_email;
+    // Obtener el user_id de Supabase por email (opcional: guardar en user meta)
+    $user_id = get_user_meta($user->ID, 'supabase_user_id', true);
+    if (!$user_id) return;
+    // Leer carrito de Supabase
+    $response = wp_remote_get("$supabase_url/rest/v1/user_carts?user_id=eq.$user_id", [
+        'headers' => [
+            'apikey' => $supabase_anon_key,
+            'Authorization' => 'Bearer ' . $supabase_anon_key,
+        ],
+    ]);
+    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) return;
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    if (empty($data) || empty($data[0]['cart'])) return;
+    $cart = $data[0]['cart'];
+    if (function_exists('WC') && WC()->cart) {
+        WC()->cart->empty_cart();
+        foreach ($cart as $item) {
+            $product_id = intval($item['id']);
+            $qty = intval($item['qty']);
+            if ($product_id && $qty) {
+                WC()->cart->add_to_cart($product_id, $qty);
+            }
+        }
+    }
+}
+
+add_action('woocommerce_cart_updated', 'petoclub_save_cart_to_supabase_on_update');
+function petoclub_save_cart_to_supabase_on_update() {
+    if (!is_user_logged_in()) return;
+    $user = wp_get_current_user();
+    $user_id = get_user_meta($user->ID, 'supabase_user_id', true);
+    if (!$user_id) return;
+    $cart_items = [];
+    if (function_exists('WC') && WC()->cart) {
+        foreach (WC()->cart->get_cart() as $cart_item) {
+            $cart_items[] = [
+                'id' => $cart_item['product_id'],
+                'qty' => $cart_item['quantity'],
+            ];
+        }
+    }
+    $supabase_url = defined('PETOCLUB_SUPABASE_URL') ? PETOCLUB_SUPABASE_URL : '';
+    $supabase_anon_key = defined('PETOCLUB_SUPABASE_ANON_KEY') ? PETOCLUB_SUPABASE_ANON_KEY : '';
+    if (!$supabase_url || !$supabase_anon_key) return;
+    // Guardar carrito en Supabase
+    $body = json_encode([
+        [
+            'user_id' => $user_id,
+            'cart' => $cart_items,
+            'updated_at' => current_time('mysql', true),
+        ]
+    ]);
+    wp_remote_post("$supabase_url/rest/v1/user_carts?on_conflict=user_id", [
+        'headers' => [
+            'apikey' => $supabase_anon_key,
+            'Authorization' => 'Bearer ' . $supabase_anon_key,
+            'Content-Type' => 'application/json',
+            'Prefer' => 'resolution=merge-duplicates',
+        ],
+        'body' => $body,
+    ]);
+}
 
 /**
  * Verifica si el usuario está intentando acceder al checkout y guarda la URL
@@ -43,15 +118,49 @@ function petoclub_check_checkout_auth() {
  * Verifica la sesión de Supabase antes de mostrar el formulario de checkout
  */
 function petoclub_verify_supabase_session() {
-    // Verificar si hay un token de Supabase en la solicitud
+    // Verificar si hay un token de Supabase en la cookie o en la URL
     $supabase_token = isset($_COOKIE['supabase.auth.token']) ? $_COOKIE['supabase.auth.token'] : null;
-
+    if (!$supabase_token && isset($_GET['supabase_token'])) {
+        $supabase_token = sanitize_text_field($_GET['supabase_token']);
+        // Validar el token con Supabase
+        $supabase_url = defined('PETOCLUB_SUPABASE_URL') ? PETOCLUB_SUPABASE_URL : '';
+        $supabase_anon_key = defined('PETOCLUB_SUPABASE_ANON_KEY') ? PETOCLUB_SUPABASE_ANON_KEY : '';
+        $response = wp_remote_get($supabase_url . '/auth/v1/user', [
+            'headers' => [
+                'apikey' => $supabase_anon_key,
+                'Authorization' => 'Bearer ' . $supabase_token,
+            ]
+        ]);
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $user_data = json_decode(wp_remote_retrieve_body($response), true);
+            if (!empty($user_data['email'])) {
+                $user = get_user_by('email', $user_data['email']);
+                if (!$user) {
+                    // Crear el usuario si no existe
+                    $user_id = wp_insert_user([
+                        'user_login' => $user_data['email'],
+                        'user_email' => $user_data['email'],
+                        'user_pass' => wp_generate_password(),
+                        'show_admin_bar_front' => false
+                    ]);
+                    $user = get_user_by('id', $user_id);
+                }
+                if ($user) {
+                    // Loguear al usuario en WP
+                    wp_set_current_user($user->ID);
+                    wp_set_auth_cookie($user->ID, true);
+                    // Guardar el token en la cookie para futuras visitas
+                    setcookie('supabase.auth.token', $supabase_token, time() + 3600, COOKIEPATH, COOKIE_DOMAIN, is_ssl());
+                    return;
+                }
+            }
+        }
+    }
     if (!$supabase_token) {
         // Si no hay token, redirigir al login
         wp_redirect(wp_login_url());
         exit;
     }
-
     // Aquí podrías agregar una verificación adicional del token con la API de Supabase si lo deseas
 }
 

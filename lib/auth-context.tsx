@@ -1,7 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 import { Session } from '@supabase/supabase-js';
-import { Alert } from 'react-native';
 
 type AuthContextType = {
   session: Session | null;
@@ -58,10 +57,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         if (isMounted.current) setLoading(true);
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) return { error };
         return { error: null };
       } catch (error: any) {
-        Alert.alert('Error al iniciar sesión', error.message);
         return { error };
       } finally {
         if (isMounted.current) setLoading(false);
@@ -79,12 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           },
         });
-        if (error) throw error;
-        Alert.alert('Registro exitoso', 'Por favor verifica tu correo electrónico para confirmar tu cuenta.');
+        if (error) return { error };
         return { error: null };
       } catch (error: any) {
-        console.error('Error en el registro:', error);
-        Alert.alert('Error al registrarse', error.message || 'Error desconocido');
         return { error };
       } finally {
         if (isMounted.current) setLoading(false);
@@ -94,10 +89,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         if (isMounted.current) setLoading(true);
         const { error } = await supabase.auth.signOut();
-        if (error) throw error;
+        if (error) return { error };
         return { error: null };
       } catch (error: any) {
-        Alert.alert('Error al cerrar sesión', error.message);
         return { error };
       } finally {
         if (isMounted.current) setLoading(false);
@@ -109,11 +103,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: 'petclub://reset-password',
         });
-        if (error) throw error;
-        Alert.alert('Correo enviado', 'Revisa tu correo electrónico para restablecer tu contraseña.');
+        if (error) return { error };
         return { error: null };
       } catch (error: any) {
-        Alert.alert('Error al restablecer contraseña', error.message);
         return { error };
       } finally {
         if (isMounted.current) setLoading(false);

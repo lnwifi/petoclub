@@ -210,9 +210,12 @@ FOR EACH ROW
 EXECUTE FUNCTION public.check_interest_limit();
 
 -- Función para obtener información de membresía de un usuario
+-- Drop existing function first to avoid return type conflict
+DROP FUNCTION IF EXISTS public.get_user_membership;
+
 CREATE OR REPLACE FUNCTION public.get_user_membership(user_id UUID)
 RETURNS TABLE (
-    membership_id UUID,
+    membership_type_id UUID,
     membership_name TEXT,
     membership_description TEXT,
     max_pets INTEGER,
@@ -229,7 +232,7 @@ RETURNS TABLE (
 BEGIN
     RETURN QUERY
     SELECT 
-        um.id AS membership_id,
+        um.membership_type_id,
         mt.name AS membership_name,
         mt.description AS membership_description,
         mt.max_pets,

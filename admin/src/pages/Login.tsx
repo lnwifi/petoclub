@@ -20,7 +20,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [formError, setFormError] = useState('');
-  const { signIn, error, loading, resetError, isSigningIn, user } = useAuth();
+  const { signIn, error, loading, resetError, isSigningIn, user, isAdmin } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,10 +31,10 @@ export default function Login() {
   }, [error, resetError]);
 
   useEffect(() => {
-    if (!loading && !error && user) {
+    if (!loading && !error && user && isAdmin) {
       navigate('/');
     }
-  }, [loading, error, user, navigate]);
+  }, [loading, error, user, isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

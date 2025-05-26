@@ -25,4 +25,10 @@ config.resolver = {
 // Configure resolver to handle Supabase packages
 config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
 
+// Alias para ignorar react-native-maps en web
+config.resolver.alias = {
+  ...(config.resolver.alias || {}),
+  'react-native-maps': require('path').resolve(__dirname, 'app/mocks/react-native-maps.js'),
+};
+
 module.exports = config;

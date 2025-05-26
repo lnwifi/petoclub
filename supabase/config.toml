@@ -99,6 +99,9 @@ file_size_limit = "50MiB"
 # public = false
 # file_size_limit = "50MiB"
 # allowed_mime_types = ["image/png", "image/jpeg"]
+
+# Configuración de tareas programadas (CRON)
+# Nota: La configuración de cron se maneja en .supabase-functions.yml
 # objects_path = "./images"
 
 [auth]

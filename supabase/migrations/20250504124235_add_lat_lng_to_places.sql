@@ -1,0 +1,4 @@
+-- Add lat and lng columns to places table
+ALTER TABLE places
+ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION,
+ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION;

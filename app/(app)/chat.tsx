@@ -6,6 +6,7 @@ import { Send, ArrowLeft } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { Animated, Easing } from 'react-native';
 
 // Definir tipos
 type Pet = {
@@ -54,9 +55,12 @@ export default function ChatScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [myPet, setMyPet] = useState<Pet | null>(null);
   const [otherPet, setOtherPet] = useState<Pet | null>(null);
+  const [isOtherTyping, setIsOtherTyping] = useState(false);
+  let typingTimeout: NodeJS.Timeout | null = null;
   
   const flatListRef = useRef<FlatList>(null);
-  
+  const typingAnim = useRef(new Animated.Value(0)).current;
+
   // Cargar datos iniciales
   useEffect(() => {
     if (!matchId) {
@@ -66,37 +70,78 @@ export default function ChatScreen() {
     }
     
     loadInitialData();
-    
-    // Suscribirse a nuevos mensajes
-    const subscription = supabase
-      .channel('chat_messages')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'chat_messages',
-        filter: `match_id=eq.${matchId}`
-      }, (payload) => {
-        // Añadir el nuevo mensaje a la lista
-        const newMsg = payload.new as Message;
-        setMessages(prev => [...prev, newMsg]);
-        
-        // Marcar como leído si no es mío
-        if (newMsg.sender_id !== userId) {
-          markMessageAsRead(newMsg.id);
+  }, [matchId]);
+  
+  // Suscribirse a nuevos mensajes y eventos "typing"
+  useEffect(() => {
+    if (!matchId) return;
+
+    // Usar la nueva API de canales de Supabase para realtime
+    const channel = supabase
+      .channel('chat-messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `match_id=eq.${matchId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          setMessages(prev => {
+            // Evitar duplicados por id
+            if (prev.some(msg => msg.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          // Marcar como leído si no es mío
+          if (newMsg.sender_id !== userId) {
+            markMessageAsRead(newMsg.id);
+          }
+          // Scroll al final
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
         }
-        
-        // Scroll al final
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      })
+      )
+      // Evento custom "typing"
+      .on(
+        'broadcast',
+        { event: 'typing', },
+        (payload) => {
+          // Mostrar "escribiendo..." solo si el otro usuario es quien escribe
+          if (payload.payload.sender_id !== userId) {
+            setIsOtherTyping(true);
+            // Ocultar después de 2 segundos si no hay más eventos
+            if (typingTimeout) clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => setIsOtherTyping(false), 2000);
+          }
+        }
+      )
       .subscribe();
-    
+
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
+      if (typingTimeout) clearTimeout(typingTimeout);
     };
   }, [matchId, userId]);
   
+  useEffect(() => {
+    if (isOtherTyping) {
+      Animated.loop(
+        Animated.timing(typingAnim, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      ).start();
+    } else {
+      typingAnim.stopAnimation();
+      typingAnim.setValue(0);
+    }
+  }, [isOtherTyping]);
+
   // Cargar datos iniciales
   const loadInitialData = async () => {
     try {
@@ -185,6 +230,17 @@ export default function ChatScreen() {
     }
   };
   
+  // Emitir evento "typing" al escribir
+  const handleTyping = (text: string) => {
+    setNewMessage(text);
+    // Notificar al otro usuario que estoy escribiendo
+    supabase.channel('chat-messages').send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { sender_id: userId, match_id: matchId }
+    });
+  };
+  
   // Enviar mensaje
   const sendMessage = async () => {
     if (!newMessage.trim() || !matchId || !userId) return;
@@ -192,17 +248,23 @@ export default function ChatScreen() {
     try {
       setSending(true);
       
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('chat_messages')
         .insert({
           match_id: matchId,
           sender_id: userId,
           message: newMessage.trim(),
           read: false
-        });
+        })
+        .select()
+        .single();
       
       if (error) throw error;
       
+      // Mostrar el mensaje enviado inmediatamente
+      if (data) {
+        setMessages(prev => [...prev, data]);
+      }
       setNewMessage('');
       
       // Scroll al final
@@ -341,6 +403,28 @@ export default function ChatScreen() {
         )}
       />
       
+      {isOtherTyping && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+          <Text style={{ color: '#888', fontStyle: 'italic', marginRight: 8 }}>Escribiendo</Text>
+          {[0, 1, 2].map(i => (
+            <Animated.Text
+              key={i}
+              style={{
+                color: '#888',
+                fontSize: 18,
+                opacity: typingAnim.interpolate({
+                  inputRange: [0, 0.2 + i * 0.2, 0.4 + i * 0.2, 1],
+                  outputRange: [0.2, 1, 0.2, 0.2],
+                }),
+                marginHorizontal: 1,
+                fontWeight: 'bold',
+              }}>
+              .
+            </Animated.Text>
+          ))}
+        </View>
+      )}
+      
       {/* Input para enviar mensajes */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -350,7 +434,7 @@ export default function ChatScreen() {
           <TextInput
             style={styles.input}
             value={newMessage}
-            onChangeText={setNewMessage}
+            onChangeText={handleTyping}
             placeholder="Escribe un mensaje..."
             placeholderTextColor="#999"
             multiline

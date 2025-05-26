@@ -1,0 +1,22 @@
+// Lista de intereses posibles para mascotas. Modifica o traduce los intereses aquí.
+export const PET_INTERESTS = [
+  'Jugar con pelota',
+  'Pasear',
+  'Dormir',
+  'Comer',
+  'Correr',
+  'Nadar',
+  'Socializar',
+  'Mimos',
+  'Juguetes',
+  'Escarbar',
+  'Cazar',
+  'Saltos',
+  'Obediencia',
+  'Aprender trucos',
+  'Viajar en auto',
+  'Tomar sol',
+  'Mirar por la ventana',
+  'Bañarse',
+  'Cepillado',
+];
